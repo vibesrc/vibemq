@@ -15,7 +15,13 @@ async fn test_default_hooks_allow_all() {
 
     // Test publish
     let result = hooks
-        .on_publish_check("client1", Some("user"), "test/topic", QoS::AtMostOnce, false)
+        .on_publish_check(
+            "client1",
+            Some("user"),
+            "test/topic",
+            QoS::AtMostOnce,
+            false,
+        )
         .await
         .unwrap();
     assert!(result, "DefaultHooks should allow publish");
@@ -99,9 +105,7 @@ impl Hooks for DenyHooks {
 
 #[tokio::test]
 async fn test_composite_hooks_all_must_allow() {
-    let hooks = CompositeHooks::new()
-        .with(AllowHooks)
-        .with(AllowHooks);
+    let hooks = CompositeHooks::new().with(AllowHooks).with(AllowHooks);
 
     let result = hooks
         .on_authenticate("client1", Some("user"), Some(b"pass"))
@@ -112,9 +116,7 @@ async fn test_composite_hooks_all_must_allow() {
 
 #[tokio::test]
 async fn test_composite_hooks_one_deny_fails() {
-    let hooks = CompositeHooks::new()
-        .with(AllowHooks)
-        .with(DenyHooks);
+    let hooks = CompositeHooks::new().with(AllowHooks).with(DenyHooks);
 
     let result = hooks
         .on_authenticate("client1", Some("user"), Some(b"pass"))
@@ -125,12 +127,16 @@ async fn test_composite_hooks_one_deny_fails() {
 
 #[tokio::test]
 async fn test_composite_hooks_publish_check() {
-    let hooks = CompositeHooks::new()
-        .with(AllowHooks)
-        .with(DenyHooks);
+    let hooks = CompositeHooks::new().with(AllowHooks).with(DenyHooks);
 
     let result = hooks
-        .on_publish_check("client1", Some("user"), "test/topic", QoS::AtMostOnce, false)
+        .on_publish_check(
+            "client1",
+            Some("user"),
+            "test/topic",
+            QoS::AtMostOnce,
+            false,
+        )
         .await
         .unwrap();
     assert!(!result, "One hook denies publish, should be denied");
@@ -138,9 +144,7 @@ async fn test_composite_hooks_publish_check() {
 
 #[tokio::test]
 async fn test_composite_hooks_subscribe_check() {
-    let hooks = CompositeHooks::new()
-        .with(AllowHooks)
-        .with(DenyHooks);
+    let hooks = CompositeHooks::new().with(AllowHooks).with(DenyHooks);
 
     let result = hooks
         .on_subscribe_check("client1", Some("user"), "test/#", QoS::AtLeastOnce)

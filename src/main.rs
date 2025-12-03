@@ -158,20 +158,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     if args.config.is_some() {
-        info!("Loaded configuration from {:?}", args.config.as_ref().unwrap());
+        info!(
+            "Loaded configuration from {:?}",
+            args.config.as_ref().unwrap()
+        );
     }
 
     // CLI args override file config
     let bind_addr = args.bind.unwrap_or(file_config.server.bind);
     let ws_bind_addr = args.ws_bind.or(file_config.server.ws_bind);
-    let max_connections = args.max_connections.unwrap_or(file_config.limits.max_connections);
-    let max_packet_size = args.max_packet_size.unwrap_or(file_config.limits.max_packet_size);
-    let keep_alive = args.keep_alive.unwrap_or(file_config.session.default_keep_alive);
+    let max_connections = args
+        .max_connections
+        .unwrap_or(file_config.limits.max_connections);
+    let max_packet_size = args
+        .max_packet_size
+        .unwrap_or(file_config.limits.max_packet_size);
+    let keep_alive = args
+        .keep_alive
+        .unwrap_or(file_config.session.default_keep_alive);
     let max_keep_alive = file_config.session.max_keep_alive;
-    let max_topic_alias = args.max_topic_alias.unwrap_or(file_config.session.max_topic_aliases);
+    let max_topic_alias = args
+        .max_topic_alias
+        .unwrap_or(file_config.session.max_topic_aliases);
     let receive_maximum = args.receive_maximum.unwrap_or(65535);
     let retain_available = args.retain.unwrap_or(file_config.mqtt.retain_available);
-    let wildcard_subs = args.wildcard_subs.unwrap_or(file_config.mqtt.wildcard_subscriptions);
+    let wildcard_subs = args
+        .wildcard_subs
+        .unwrap_or(file_config.mqtt.wildcard_subscriptions);
 
     // Parse max QoS
     let max_qos_value = args.max_qos.unwrap_or(file_config.mqtt.max_qos);
@@ -207,7 +220,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_packet_size,
         default_keep_alive: keep_alive,
         max_keep_alive,
-        session_expiry_check_interval: Duration::from_secs(file_config.session.expiry_check_interval),
+        session_expiry_check_interval: Duration::from_secs(
+            file_config.session.expiry_check_interval,
+        ),
         receive_maximum,
         max_qos,
         retain_available,
@@ -230,12 +245,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Log auth/ACL status
     if file_config.auth.enabled {
-        info!("  Authentication: enabled ({} users configured)", file_config.auth.users.len());
+        info!(
+            "  Authentication: enabled ({} users configured)",
+            file_config.auth.users.len()
+        );
     } else {
         info!("  Authentication: disabled");
     }
     if file_config.acl.enabled {
-        info!("  ACL: enabled ({} roles configured)", file_config.acl.roles.len());
+        info!(
+            "  ACL: enabled ({} roles configured)",
+            file_config.acl.roles.len()
+        );
     } else {
         info!("  ACL: disabled");
     }
@@ -245,11 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let acl_provider = Arc::new(AclProvider::new(&file_config.acl, auth_provider.clone()));
 
     // Compose hooks: auth first, then ACL
-    let hooks = Arc::new(
-        CompositeHooks::new()
-            .with(auth_provider)
-            .with(acl_provider),
-    );
+    let hooks = Arc::new(CompositeHooks::new().with(auth_provider).with(acl_provider));
 
     // Create and run broker with hooks
     let broker = Broker::with_hooks(broker_config, hooks);

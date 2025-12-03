@@ -64,9 +64,7 @@ impl AuthProvider {
 
     /// Get the ACL role for a username
     pub fn get_user_role(&self, username: &str) -> Option<&str> {
-        self.users
-            .get(username)
-            .and_then(|u| u.role.as_deref())
+        self.users.get(username).and_then(|u| u.role.as_deref())
     }
 
     /// Get the username for a connected client

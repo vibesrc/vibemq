@@ -67,7 +67,13 @@ async fn test_acl_disabled_allows_all() {
     let provider = AclProvider::new(&acl_config, auth_provider);
 
     let result = provider
-        .on_publish_check("client1", Some("anyone"), "any/topic", QoS::AtMostOnce, false)
+        .on_publish_check(
+            "client1",
+            Some("anyone"),
+            "any/topic",
+            QoS::AtMostOnce,
+            false,
+        )
         .await
         .unwrap();
     assert!(result, "Should allow when ACL is disabled");

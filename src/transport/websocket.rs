@@ -56,7 +56,10 @@ impl WsStream {
     }
 
     /// Accept a WebSocket connection with MQTT subprotocol and path validation
-    pub async fn accept_with_path(stream: TcpStream, expected_path: &str) -> Result<Self, io::Error> {
+    pub async fn accept_with_path(
+        stream: TcpStream,
+        expected_path: &str,
+    ) -> Result<Self, io::Error> {
         let expected_path = expected_path.to_string();
 
         // Custom callback to check for MQTT subprotocol and validate path

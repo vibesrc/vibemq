@@ -69,7 +69,12 @@ impl AclProvider {
     }
 
     /// Check if topic matches pattern with variable substitution
-    fn matches_pattern(pattern: &str, topic: &str, client_id: &str, username: Option<&str>) -> bool {
+    fn matches_pattern(
+        pattern: &str,
+        topic: &str,
+        client_id: &str,
+        username: Option<&str>,
+    ) -> bool {
         // Substitute variables
         let pattern = pattern
             .replace("%c", client_id)

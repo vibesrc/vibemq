@@ -159,7 +159,9 @@ impl<T: Hooks + ?Sized> Hooks for std::sync::Arc<T> {
         username: Option<&str>,
         password: Option<&[u8]>,
     ) -> HookResult<bool> {
-        (**self).on_authenticate(client_id, username, password).await
+        (**self)
+            .on_authenticate(client_id, username, password)
+            .await
     }
 
     async fn on_publish_check(
@@ -170,7 +172,9 @@ impl<T: Hooks + ?Sized> Hooks for std::sync::Arc<T> {
         qos: QoS,
         retain: bool,
     ) -> HookResult<bool> {
-        (**self).on_publish_check(client_id, username, topic, qos, retain).await
+        (**self)
+            .on_publish_check(client_id, username, topic, qos, retain)
+            .await
     }
 
     async fn on_subscribe_check(
@@ -180,7 +184,9 @@ impl<T: Hooks + ?Sized> Hooks for std::sync::Arc<T> {
         filter: &str,
         qos: QoS,
     ) -> HookResult<bool> {
-        (**self).on_subscribe_check(client_id, username, filter, qos).await
+        (**self)
+            .on_subscribe_check(client_id, username, filter, qos)
+            .await
     }
 
     async fn on_client_connected(&self, client_id: &str, username: Option<&str>) {

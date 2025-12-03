@@ -170,7 +170,10 @@ impl Broker {
         // Spawn WebSocket listener if configured
         if let Some(ws_addr) = self.config.ws_bind_addr {
             let ws_listener = TcpListener::bind(ws_addr).await?;
-            info!("MQTT/WebSocket listening on {} (path: {})", ws_addr, self.config.ws_path);
+            info!(
+                "MQTT/WebSocket listening on {} (path: {})",
+                ws_addr, self.config.ws_path
+            );
 
             let sessions = self.sessions.clone();
             let subscriptions = self.subscriptions.clone();
