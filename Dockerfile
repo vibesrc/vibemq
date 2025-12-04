@@ -7,10 +7,10 @@ RUN apk add --no-cache musl-dev build-base
 ARG TARGETPLATFORM
 
 # Determine correct Rust target triple
+# Note: armv7 not supported - rust:alpine images don't have arm/v7 variant
 RUN case "$TARGETPLATFORM" in \
     "linux/amd64")   echo "x86_64-unknown-linux-musl"        > /rust_target ;; \
     "linux/arm64")   echo "aarch64-unknown-linux-musl"       > /rust_target ;; \
-    "linux/arm/v7")  echo "armv7-unknown-linux-musleabihf"   > /rust_target ;; \
     *) echo "Unsupported platform: $TARGETPLATFORM" && exit 1 ;; \
     esac
 
