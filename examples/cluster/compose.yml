@@ -1,0 +1,11 @@
+services:
+  vibemq:
+    image: ghcr.io/bromq-dev/vibemq:latest
+    build:
+      context: ../..
+    deploy:
+      replicas: 3
+    ports:
+      - 1883-1885:1883  # Range maps to each replica
+    volumes:
+      - ./config.toml:/etc/vibemq/config.toml:ro

@@ -1,0 +1,16 @@
+# VibeMQ Cluster Configuration
+# Shared by all replicas - Docker DNS resolves "vibemq" to all container IPs
+
+[auth]
+allow_anonymous = true
+
+[[cluster]]
+enabled = true
+gossip_addr = "0.0.0.0:7946"
+peer_addr = "0.0.0.0:7947"
+# Docker Compose DNS resolves service name to all replica IPs
+seeds = ["vibemq:7946"]
+
+[metrics]
+enabled = true
+bind = "0.0.0.0:9090"

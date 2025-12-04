@@ -1,0 +1,147 @@
+# VibeMQ Configuration Example
+# Copy this file to vibemq.toml and customize as needed
+#
+# Environment Variables:
+#
+# 1. In-file substitution using ${VAR} or ${VAR:-default} syntax:
+#    bind = "${MQTT_HOST:-0.0.0.0}:${MQTT_PORT:-1883}"
+#    password = "${ADMIN_PASSWORD}"
+#
+# 2. Override any field with VIBEMQ_ prefixed env vars:
+#    VIBEMQ_SERVER_BIND=0.0.0.0:1884
+#    VIBEMQ_LIMITS_MAX_CONNECTIONS=50000
+#    VIBEMQ_AUTH_ENABLED=true
+#    VIBEMQ_MQTT_MAX_QOS=1
+
+[log]
+# Log level: error, warn, info, debug, trace
+level = "info"
+
+[server]
+# TCP bind address for MQTT connections
+bind = "0.0.0.0:1883"
+# Optional WebSocket bind address
+# ws_bind = "0.0.0.0:9001"
+# WebSocket path (default: "/mqtt")
+ws_path = "/mqtt"
+# Number of worker threads (0 = auto, uses CPU count)
+workers = 0
+
+[limits]
+# Maximum number of concurrent connections
+max_connections = 100000
+# Maximum MQTT packet size in bytes (1MB default)
+max_packet_size = 1048576
+# Maximum in-flight messages per client (QoS 1/2)
+max_inflight = 32
+# Maximum queued messages per offline client
+max_queued_messages = 1000
+# Maximum pending PUBREL for QoS 2
+max_awaiting_rel = 100
+# Seconds before retrying unacked messages
+retry_interval = 30
+
+[session]
+# Default keep alive in seconds
+default_keep_alive = 60
+# Maximum keep alive in seconds
+max_keep_alive = 65535
+# Seconds between session expiry checks
+expiry_check_interval = 60
+# Maximum topic aliases (MQTT v5.0)
+max_topic_aliases = 65535
+
+[mqtt]
+# Maximum QoS level (0, 1, or 2)
+max_qos = 2
+# Whether retained messages are available
+retain_available = true
+# Whether wildcard subscriptions are available
+wildcard_subscriptions = true
+# Whether subscription identifiers are available (MQTT v5.0)
+subscription_identifiers = true
+# Whether shared subscriptions are available
+shared_subscriptions = true
+
+# Authentication configuration
+[auth]
+# Enable authentication
+enabled = false
+# Allow anonymous connections when auth is enabled
+allow_anonymous = true
+
+# Static user list (uncomment and customize)
+# [[auth.users]]
+# username = "admin"
+# password = "admin_password"
+# role = "admin"  # ACL role reference
+
+# [[auth.users]]
+# username = "sensor1"
+# password = "sensor_password"
+# role = "device"
+
+# Access Control List configuration
+[acl]
+# Enable ACL
+enabled = false
+
+# ACL roles (uncomment and customize)
+# [[acl.roles]]
+# name = "admin"
+# publish = ["#"]      # Can publish to all topics
+# subscribe = ["#"]    # Can subscribe to all topics
+
+# [[acl.roles]]
+# name = "device"
+# publish = ["sensors/%c/#"]      # %c = client_id
+# subscribe = ["commands/%c/#"]   # %u = username
+
+# [[acl.roles]]
+# name = "readonly"
+# publish = []
+# subscribe = ["sensors/#", "status/#"]
+
+# Default permissions for users without explicit role (including anonymous)
+# %c = client_id, %u = username substitution works here
+[acl.default]
+publish = []
+subscribe = ["public/#", "$SYS/broker/+"]
+
+# Bridge configuration
+# Bridges forward messages between this broker and remote MQTT brokers
+#
+# [[bridge]]
+# name = "cloud"                          # Unique bridge identifier
+# address = "cloud.example.com:8883"      # Remote broker address
+# protocol = "mqtts"                       # mqtt, mqtts, ws, wss
+# client_id = "edge-bridge-01"            # Client ID for remote connection
+# username = "bridge"                     # Optional authentication
+# password = "secret"
+# keepalive = 60                          # Keep alive interval (seconds)
+# clean_start = true                      # Start with clean session
+# reconnect_interval = 5                  # Initial reconnect delay (seconds)
+# max_reconnect_interval = 60             # Maximum reconnect delay (seconds)
+# enabled = true                          # Enable/disable this bridge
+#
+# # Loop prevention strategy:
+# # - "no_local": Use MQTT v5.0 no_local subscription flag (recommended)
+# # - "user_property": Tag messages with origin broker ID
+# # - "both": Use both strategies
+# # - "none": No loop prevention (use with caution)
+# loop_prevention = "no_local"
+#
+# # Forward rules define which topics to bridge and in which direction
+# [[bridge.forwards]]
+# local_topic = "sensors/#"               # Local topic pattern
+# remote_topic = "edge/device01/sensors/#"  # Remote topic pattern
+# direction = "out"                       # out, in, or both
+# qos = 1                                 # Maximum QoS (0, 1, or 2)
+# retain = true                           # Forward retained messages
+#
+# [[bridge.forwards]]
+# local_topic = "commands/#"
+# remote_topic = "cloud/commands/#"
+# direction = "in"
+# qos = 2
+# retain = false

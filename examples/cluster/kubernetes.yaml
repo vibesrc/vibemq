@@ -1,0 +1,167 @@
+# VibeMQ Kubernetes Deployment with Horizontal Pod Autoscaling
+#
+# This deploys a clustered VibeMQ with:
+# - Headless service for internal cluster discovery (gossip)
+# - LoadBalancer service for MQTT clients
+# - HPA for autoscaling based on CPU
+# - Prometheus metrics endpoint for observability
+#
+# Usage:
+#   kubectl apply -f kubernetes.yaml
+#   kubectl get pods -l app=vibemq -w
+#
+# Test:
+#   MQTT_HOST=$(kubectl get svc vibemq -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+#   mosquitto_sub -h $MQTT_HOST -t "test/#" -v
+
+---
+# Headless service for cluster discovery
+# DNS lookup returns all pod IPs for gossip protocol
+apiVersion: v1
+kind: Service
+metadata:
+  name: vibemq-headless
+  labels:
+    app: vibemq
+spec:
+  clusterIP: None
+  selector:
+    app: vibemq
+  ports:
+    - name: gossip
+      port: 7946
+      protocol: UDP
+    - name: peer
+      port: 7947
+
+---
+# NodePort for MQTT clients (accessible on host)
+apiVersion: v1
+kind: Service
+metadata:
+  name: vibemq
+  labels:
+    app: vibemq
+spec:
+  type: NodePort
+  selector:
+    app: vibemq
+  ports:
+    - name: mqtt
+      port: 1883
+      targetPort: 1883
+      nodePort: 31883
+
+---
+# ConfigMap for VibeMQ configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vibemq-config
+data:
+  config.toml: |
+    [log]
+    level = "info"
+
+    [auth]
+    allow_anonymous = true
+
+    [[cluster]]
+    enabled = true
+    gossip_addr = "0.0.0.0:7946"
+    peer_addr = "0.0.0.0:7947"
+    # Headless service - chitchat resolves to all pod IPs
+    seeds = ["vibemq-headless:7946"]
+
+    [metrics]
+    enabled = true
+    bind = "0.0.0.0:9090"
+
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vibemq
+  labels:
+    app: vibemq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vibemq
+  template:
+    metadata:
+      labels:
+        app: vibemq
+      annotations:
+        # Prometheus scraping annotations
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: vibemq
+          image: ghcr.io/bromq-dev/vibemq:latest
+          ports:
+            - name: mqtt
+              containerPort: 1883
+            - name: metrics
+              containerPort: 9090
+            - name: gossip
+              containerPort: 7946
+              protocol: UDP
+            - name: peer
+              containerPort: 7947
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vibemq
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: vibemq-config
+
+---
+# Horizontal Pod Autoscaler
+# Scales based on CPU utilization
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vibemq
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vibemq
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

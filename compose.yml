@@ -1,0 +1,11 @@
+services:
+  vibemq:
+    image: ghcr.io/bromq-dev/vibemq:latest
+    build: .
+    ports:
+      - 1883:1883
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "1883"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
