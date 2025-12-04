@@ -251,10 +251,10 @@ impl Properties {
     pub fn encoded_size(&self) -> usize {
         let mut size = 0;
 
-        if let Some(_) = self.payload_format_indicator {
+        if self.payload_format_indicator.is_some() {
             size += 2; // 1 byte id + 1 byte value
         }
-        if let Some(_) = self.message_expiry_interval {
+        if self.message_expiry_interval.is_some() {
             size += 5; // 1 byte id + 4 bytes value
         }
         if let Some(ref s) = self.content_type {
@@ -269,13 +269,13 @@ impl Properties {
         for id in &self.subscription_identifiers {
             size += 1 + variable_int_len(*id);
         }
-        if let Some(_) = self.session_expiry_interval {
+        if self.session_expiry_interval.is_some() {
             size += 5;
         }
         if let Some(ref s) = self.assigned_client_identifier {
             size += 1 + 2 + s.len();
         }
-        if let Some(_) = self.server_keep_alive {
+        if self.server_keep_alive.is_some() {
             size += 3;
         }
         if let Some(ref s) = self.authentication_method {
@@ -284,13 +284,13 @@ impl Properties {
         if let Some(ref d) = self.authentication_data {
             size += 1 + 2 + d.len();
         }
-        if let Some(_) = self.request_problem_information {
+        if self.request_problem_information.is_some() {
             size += 2;
         }
-        if let Some(_) = self.will_delay_interval {
+        if self.will_delay_interval.is_some() {
             size += 5;
         }
-        if let Some(_) = self.request_response_information {
+        if self.request_response_information.is_some() {
             size += 2;
         }
         if let Some(ref s) = self.response_information {
@@ -302,34 +302,34 @@ impl Properties {
         if let Some(ref s) = self.reason_string {
             size += 1 + 2 + s.len();
         }
-        if let Some(_) = self.receive_maximum {
+        if self.receive_maximum.is_some() {
             size += 3;
         }
-        if let Some(_) = self.topic_alias_maximum {
+        if self.topic_alias_maximum.is_some() {
             size += 3;
         }
-        if let Some(_) = self.topic_alias {
+        if self.topic_alias.is_some() {
             size += 3;
         }
-        if let Some(_) = self.maximum_qos {
+        if self.maximum_qos.is_some() {
             size += 2;
         }
-        if let Some(_) = self.retain_available {
+        if self.retain_available.is_some() {
             size += 2;
         }
         for (k, v) in &self.user_properties {
             size += 1 + 2 + k.len() + 2 + v.len();
         }
-        if let Some(_) = self.maximum_packet_size {
+        if self.maximum_packet_size.is_some() {
             size += 5;
         }
-        if let Some(_) = self.wildcard_subscription_available {
+        if self.wildcard_subscription_available.is_some() {
             size += 2;
         }
-        if let Some(_) = self.subscription_identifier_available {
+        if self.subscription_identifier_available.is_some() {
             size += 2;
         }
-        if let Some(_) = self.shared_subscription_available {
+        if self.shared_subscription_available.is_some() {
             size += 2;
         }
 

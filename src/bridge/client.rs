@@ -183,7 +183,7 @@ impl BridgeClient {
         let (mut read_half, mut write_half) = stream.into_split();
 
         // Send CONNECT packet
-        let connect = Packet::Connect(Connect {
+        let connect = Packet::Connect(Box::new(Connect {
             protocol_version: ProtocolVersion::V5,
             client_id: config.client_id.clone(),
             clean_start: config.clean_start,
@@ -192,7 +192,7 @@ impl BridgeClient {
             password: config.password.as_ref().map(|p| Bytes::from(p.clone())),
             will: None,
             properties: Properties::default(),
-        });
+        }));
 
         let mut buf = BytesMut::new();
         encoder

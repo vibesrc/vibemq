@@ -8,8 +8,9 @@ use super::{Properties, ProtocolVersion, QoS, ReasonCode, SubscriptionOptions};
 
 /// MQTT Packet - unified representation for v3.1.1 and v5.0
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum Packet {
-    Connect(Connect),
+    Connect(Box<Connect>),
     ConnAck(ConnAck),
     Publish(Publish),
     PubAck(PubAck),

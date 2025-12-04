@@ -105,7 +105,7 @@ impl TestClient {
     }
 
     async fn mqtt_connect(&mut self, client_id: &str) {
-        let connect = Packet::Connect(Connect {
+        let connect = Packet::Connect(Box::new(Connect {
             protocol_version: self.protocol_version,
             client_id: client_id.to_string(),
             clean_start: true,
@@ -114,7 +114,7 @@ impl TestClient {
             password: None,
             will: None,
             properties: Properties::default(),
-        });
+        }));
         self.send(&connect).await;
 
         match self.recv().await {

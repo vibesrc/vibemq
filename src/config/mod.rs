@@ -93,6 +93,7 @@ impl From<config::ConfigError> for ConfigError {
 /// Root configuration structure
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Config {
     /// Logging configuration
     pub log: LogConfig,
@@ -119,22 +120,6 @@ pub struct Config {
     pub metrics: MetricsConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            log: LogConfig::default(),
-            server: ServerConfig::default(),
-            limits: LimitsConfig::default(),
-            session: SessionConfig::default(),
-            mqtt: MqttConfig::default(),
-            auth: AuthConfig::default(),
-            acl: AclConfig::default(),
-            bridge: Vec::new(),
-            cluster: Vec::new(),
-            metrics: MetricsConfig::default(),
-        }
-    }
-}
 
 /// Logging configuration
 #[derive(Debug, Clone, Deserialize)]
@@ -477,8 +462,8 @@ impl Config {
         Self::load(Path::new(""))
     }
 
-    /// Load configuration from a string (for testing, no env var support)
-    pub fn from_str(content: &str) -> Result<Self, ConfigError> {
+    /// Parse configuration from a string (for testing, no env var support)
+    pub fn parse(content: &str) -> Result<Self, ConfigError> {
         let config: Config = toml::from_str(content)?;
         config.validate()?;
         Ok(config)

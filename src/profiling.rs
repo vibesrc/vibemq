@@ -786,14 +786,13 @@ fn get_heap_top() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         } else if line.trim().starts_with("t*:") && total_bytes == 0 {
             // First t*: line is the total
             let parts: Vec<&str> = line.split(':').collect();
-            if parts.len() >= 3 {
-                if parts[1].trim().parse::<u64>().is_ok() {
+            if parts.len() >= 3
+                && parts[1].trim().parse::<u64>().is_ok() {
                     let bytes_str = parts[2].split('[').next().unwrap_or("0").trim();
                     if let Ok(bytes) = bytes_str.parse::<u64>() {
                         total_bytes = bytes;
                     }
                 }
-            }
         }
     }
 
@@ -859,10 +858,8 @@ fn get_heap_top() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             ));
         }
 
-        output.push_str(&format!(
-            "\nNote: Stack traces shown as addresses. For symbolicated output:\n\
-             jeprof --text $(which vibemq) http://localhost:6060/debug/pprof/heap\n"
-        ));
+        output.push_str("\nNote: Stack traces shown as addresses. For symbolicated output:\n\
+             jeprof --text $(which vibemq) http://localhost:6060/debug/pprof/heap\n");
     }
 
     Ok(output)

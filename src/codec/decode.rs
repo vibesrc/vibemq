@@ -100,7 +100,7 @@ impl Decoder {
             }
             14 => self.decode_disconnect(flags, payload)?,
             15 => self.decode_auth(flags, payload)?,
-            0 | _ => return Err(DecodeError::InvalidPacketType(packet_type)),
+            _ => return Err(DecodeError::InvalidPacketType(packet_type)),
         };
 
         Ok(Some((packet, total_len)))
@@ -146,7 +146,7 @@ impl Decoder {
 
         let clean_start = (connect_flags & 0x02) != 0;
         let will_flag = (connect_flags & 0x04) != 0;
-        let will_qos = ((connect_flags >> 3) & 0x03) as u8;
+        let will_qos = (connect_flags >> 3) & 0x03;
         let will_retain = (connect_flags & 0x20) != 0;
         let password_flag = (connect_flags & 0x40) != 0;
         let username_flag = (connect_flags & 0x80) != 0;
@@ -228,7 +228,7 @@ impl Decoder {
             None
         };
 
-        Ok(Packet::Connect(Connect {
+        Ok(Packet::Connect(Box::new(Connect {
             protocol_version,
             client_id: client_id.to_string(),
             clean_start,
@@ -237,7 +237,7 @@ impl Decoder {
             password,
             will,
             properties,
-        }))
+        })))
     }
 
     fn decode_connack(&self, flags: u8, payload: &[u8]) -> Result<Packet, DecodeError> {

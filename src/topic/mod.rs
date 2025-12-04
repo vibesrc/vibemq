@@ -39,9 +39,9 @@ pub struct Subscription {
 /// Parse a shared subscription filter
 /// Returns (share_group, actual_filter) if it's a shared subscription, or None
 pub fn parse_shared_subscription(filter: &str) -> Option<(&str, &str)> {
-    if filter.starts_with("$share/") {
+    if let Some(rest) = filter.strip_prefix("$share/") {
         // Format: $share/{group}/{filter}
-        let rest = &filter[7..]; // Skip "$share/"
+        // Skip "$share/"
         if let Some(slash_pos) = rest.find('/') {
             let group = &rest[..slash_pos];
             let actual_filter = &rest[slash_pos + 1..];

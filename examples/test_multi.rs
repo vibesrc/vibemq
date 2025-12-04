@@ -1,5 +1,7 @@
 //! Multi-connection MQTT test - simulates what conformance tests do
 
+#![allow(clippy::vec_init_then_push)]
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::thread;
@@ -64,12 +66,10 @@ fn connect(client_id: &str) -> std::io::Result<()> {
 
 fn main() {
     // Run multiple connection tests
-    let tests = vec![
-        "basic-connect",
+    let tests = ["basic-connect",
         "test-client-1",
         "test-client-2",
-        "long-client-id-with-many-characters",
-    ];
+        "long-client-id-with-many-characters"];
 
     for (i, client_id) in tests.iter().enumerate() {
         println!("\n=== Test {} ===", i + 1);

@@ -97,6 +97,7 @@ impl<S> Connection<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         stream: S,
         addr: SocketAddr,
@@ -156,7 +157,7 @@ where
 
                 match packet {
                     Packet::Connect(connect) => {
-                        return self.handle_connect(connect).await;
+                        return self.handle_connect(*connect).await;
                     }
                     _ => {
                         // Protocol violation - first packet must be CONNECT
@@ -241,11 +242,7 @@ where
                 debug!("Authentication failed for {}", client_id);
                 let connack = ConnAck {
                     session_present: false,
-                    reason_code: if protocol_version == ProtocolVersion::V5 {
-                        ReasonCode::NotAuthorized
-                    } else {
-                        ReasonCode::NotAuthorized
-                    },
+                    reason_code: ReasonCode::NotAuthorized,
                     properties: Properties::default(),
                 };
                 self.write_buf.clear();
@@ -1018,7 +1015,7 @@ where
 
         for sub in &subscribe.subscriptions {
             // Validate topic filter
-            if let Err(_) = validate_topic_filter(&sub.filter) {
+            if validate_topic_filter(&sub.filter).is_err() {
                 reason_codes.push(ReasonCode::TopicFilterInvalid);
                 sub_info.push((
                     QoS::AtMostOnce,
@@ -1030,8 +1027,8 @@ where
             }
 
             // Check wildcard support
-            if !self.config.wildcard_subscription_available {
-                if sub.filter.contains('+') || sub.filter.contains('#') {
+            if !self.config.wildcard_subscription_available
+                && (sub.filter.contains('+') || sub.filter.contains('#')) {
                     reason_codes.push(ReasonCode::WildcardSubsNotSupported);
                     sub_info.push((
                         QoS::AtMostOnce,
@@ -1041,7 +1038,6 @@ where
                     ));
                     continue;
                 }
-            }
 
             // Check ACL for subscribe permission
             let acl_result = self

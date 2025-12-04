@@ -4,7 +4,7 @@
 //! AsyncRead and AsyncWrite for use with MQTT over WebSocket.
 
 use std::collections::VecDeque;
-use std::io::{self, ErrorKind};
+use std::io::{self};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -90,7 +90,7 @@ impl WsStream {
             Ok(response)
         })
         .await
-        .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
 
         Ok(Self::new(ws))
     }
@@ -154,7 +154,7 @@ impl AsyncRead for WsStream {
                     }
                 }
             }
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(io::Error::other(e))),
             Poll::Ready(None) => {
                 self.closed = true;
                 Poll::Ready(Ok(()))
@@ -180,9 +180,9 @@ impl AsyncWrite for WsStream {
         match Pin::new(&mut self.sink).poll_ready(cx) {
             Poll::Ready(Ok(())) => match Pin::new(&mut self.sink).start_send(message) {
                 Ok(()) => Poll::Ready(Ok(buf.len())),
-                Err(e) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e))),
+                Err(e) => Poll::Ready(Err(io::Error::other(e))),
             },
-            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e))),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e))),
             Poll::Pending => {
                 // Put data back in buffer
                 // Note: This is a simplification; in practice we'd need more careful handling
@@ -194,7 +194,7 @@ impl AsyncWrite for WsStream {
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match Pin::new(&mut self.sink).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e))),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e))),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -206,11 +206,11 @@ impl AsyncWrite for WsStream {
                 let _ = Pin::new(&mut self.sink).start_send(Message::Close(None));
                 match Pin::new(&mut self.sink).poll_flush(cx) {
                     Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-                    Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e))),
+                    Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e))),
                     Poll::Pending => Poll::Pending,
                 }
             }
-            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e))),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e))),
             Poll::Pending => Poll::Pending,
         }
     }

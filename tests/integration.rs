@@ -91,7 +91,7 @@ impl TestClient {
     }
 
     async fn mqtt_connect(&mut self, client_id: &str, clean_start: bool) -> ConnAck {
-        let connect = Packet::Connect(Connect {
+        let connect = Packet::Connect(Box::new(Connect {
             protocol_version: self.protocol_version,
             client_id: client_id.to_string(),
             clean_start,
@@ -100,7 +100,7 @@ impl TestClient {
             password: None,
             will: None,
             properties: Properties::default(),
-        });
+        }));
         self.send(&connect).await;
 
         match self.recv().await {
@@ -548,7 +548,7 @@ async fn test_will_message_on_disconnect() {
 
     // Client with will message
     let mut will_client = TestClient::connect(addr, ProtocolVersion::V311).await;
-    let connect_with_will = Packet::Connect(Connect {
+    let connect_with_will = Packet::Connect(Box::new(Connect {
         protocol_version: ProtocolVersion::V311,
         client_id: "will-client".to_string(),
         clean_start: true,
@@ -563,7 +563,7 @@ async fn test_will_message_on_disconnect() {
             properties: Properties::default(),
         }),
         properties: Properties::default(),
-    });
+    }));
     will_client.send(&connect_with_will).await;
     let _ = will_client.recv().await; // CONNACK
 

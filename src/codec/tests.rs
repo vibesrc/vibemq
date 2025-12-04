@@ -3,6 +3,8 @@
 //! Tests for encoding and decoding all MQTT packet types for both v3.1.1 and v5.0
 //! Based on MQTT specification sections 2 and 3.
 
+#![allow(clippy::field_reassign_with_default)]
+
 use bytes::{Bytes, BytesMut};
 use pretty_assertions::assert_eq;
 
@@ -42,7 +44,7 @@ fn decode_packet(buf: &[u8], version: Option<ProtocolVersion>) -> Result<Packet,
 #[test]
 fn test_connect_v311_minimal() {
     // Minimal v3.1.1 CONNECT: clean session, empty client ID
-    let packet = Packet::Connect(Connect {
+    let packet = Packet::Connect(Box::new(Connect {
         protocol_version: ProtocolVersion::V311,
         client_id: String::new(),
         clean_start: true,
@@ -51,7 +53,7 @@ fn test_connect_v311_minimal() {
         password: None,
         will: None,
         properties: Properties::default(),
-    });
+    }));
 
     let encoded = encode_packet(&packet, ProtocolVersion::V311);
     let decoded = decode_packet(&encoded, None).unwrap();
@@ -61,7 +63,7 @@ fn test_connect_v311_minimal() {
 #[test]
 fn test_connect_v311_full() {
     // Full v3.1.1 CONNECT with all fields
-    let packet = Packet::Connect(Connect {
+    let packet = Packet::Connect(Box::new(Connect {
         protocol_version: ProtocolVersion::V311,
         client_id: "test-client-123".to_string(),
         clean_start: false,
@@ -76,7 +78,7 @@ fn test_connect_v311_full() {
             properties: Properties::default(),
         }),
         properties: Properties::default(),
-    });
+    }));
 
     let encoded = encode_packet(&packet, ProtocolVersion::V311);
     let decoded = decode_packet(&encoded, None).unwrap();
@@ -86,7 +88,7 @@ fn test_connect_v311_full() {
 #[test]
 fn test_connect_v5_minimal() {
     // Minimal v5.0 CONNECT
-    let packet = Packet::Connect(Connect {
+    let packet = Packet::Connect(Box::new(Connect {
         protocol_version: ProtocolVersion::V5,
         client_id: String::new(),
         clean_start: true,
@@ -95,7 +97,7 @@ fn test_connect_v5_minimal() {
         password: None,
         will: None,
         properties: Properties::default(),
-    });
+    }));
 
     let encoded = encode_packet(&packet, ProtocolVersion::V5);
     let decoded = decode_packet(&encoded, None).unwrap();
@@ -113,7 +115,7 @@ fn test_connect_v5_with_properties() {
     props.request_response_information = Some(1);
     props.request_problem_information = Some(1);
 
-    let packet = Packet::Connect(Connect {
+    let packet = Packet::Connect(Box::new(Connect {
         protocol_version: ProtocolVersion::V5,
         client_id: "client-v5".to_string(),
         clean_start: true,
@@ -122,7 +124,7 @@ fn test_connect_v5_with_properties() {
         password: None,
         will: None,
         properties: props,
-    });
+    }));
 
     let encoded = encode_packet(&packet, ProtocolVersion::V5);
     let decoded = decode_packet(&encoded, None).unwrap();
@@ -138,7 +140,7 @@ fn test_connect_v5_with_will_properties() {
     will_props.content_type = Some("application/json".to_string());
     will_props.payload_format_indicator = Some(1);
 
-    let packet = Packet::Connect(Connect {
+    let packet = Packet::Connect(Box::new(Connect {
         protocol_version: ProtocolVersion::V5,
         client_id: "will-test".to_string(),
         clean_start: true,
@@ -153,7 +155,7 @@ fn test_connect_v5_with_will_properties() {
             properties: will_props,
         }),
         properties: Properties::default(),
-    });
+    }));
 
     let encoded = encode_packet(&packet, ProtocolVersion::V5);
     let decoded = decode_packet(&encoded, None).unwrap();
@@ -1037,7 +1039,7 @@ fn test_string_invalid_utf8() {
 #[test]
 fn test_roundtrip_all_packet_types_v311() {
     let packets = [
-        Packet::Connect(Connect {
+        Packet::Connect(Box::new(Connect {
             protocol_version: ProtocolVersion::V311,
             client_id: "test".to_string(),
             clean_start: true,
@@ -1046,7 +1048,7 @@ fn test_roundtrip_all_packet_types_v311() {
             password: None,
             will: None,
             properties: Properties::default(),
-        }),
+        })),
         Packet::Publish(Publish {
             dup: false,
             qos: QoS::AtLeastOnce,
@@ -1088,7 +1090,7 @@ fn test_roundtrip_all_packet_types_v311() {
 #[test]
 fn test_roundtrip_all_packet_types_v5() {
     let packets = [
-        Packet::Connect(Connect {
+        Packet::Connect(Box::new(Connect {
             protocol_version: ProtocolVersion::V5,
             client_id: "test".to_string(),
             clean_start: true,
@@ -1097,7 +1099,7 @@ fn test_roundtrip_all_packet_types_v5() {
             password: None,
             will: None,
             properties: Properties::default(),
-        }),
+        })),
         Packet::ConnAck(ConnAck {
             session_present: false,
             reason_code: ReasonCode::Success,
@@ -1236,7 +1238,7 @@ mod proptest_tests {
             clean_start in any::<bool>(),
             keep_alive in 0u16..65535u16,
         ) {
-            let packet = Packet::Connect(Connect {
+            let packet = Packet::Connect(Box::new(Connect {
                 protocol_version: ProtocolVersion::V311,
                 client_id,
                 clean_start,
@@ -1245,7 +1247,7 @@ mod proptest_tests {
                 password: None,
                 will: None,
                 properties: Properties::default(),
-            });
+            }));
             let encoded = encode_packet(&packet, ProtocolVersion::V311);
             let decoded = decode_packet(&encoded, None).unwrap();
             prop_assert_eq!(packet, decoded);
@@ -1354,7 +1356,7 @@ mod proptest_tests {
             corruption_pos in 0usize..100usize,
             corruption_byte in any::<u8>(),
         ) {
-            let packet = Packet::Connect(Connect {
+            let packet = Packet::Connect(Box::new(Connect {
                 protocol_version: ProtocolVersion::V311,
                 client_id,
                 clean_start: true,
@@ -1363,7 +1365,7 @@ mod proptest_tests {
                 password: None,
                 will: None,
                 properties: Properties::default(),
-            });
+            }));
             let mut encoded = encode_packet(&packet, ProtocolVersion::V311);
 
             // Corrupt a byte if within range

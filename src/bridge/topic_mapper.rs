@@ -134,7 +134,7 @@ impl CompiledRule {
             };
 
             // Get the prefix from destination pattern (before any wildcard)
-            if let Some(wildcard_pos) = dest_base.find(|c| c == '#' || c == '+') {
+            if let Some(wildcard_pos) = dest_base.find(['#', '+']) {
                 let prefix = &dest_base[..wildcard_pos];
                 result = format!("{}{}", prefix, result);
             } else {

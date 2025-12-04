@@ -86,7 +86,7 @@ fn test_parse_minimal_config() {
 bind = "127.0.0.1:1883"
 "#;
 
-    let config = Config::from_str(toml).unwrap();
+    let config = Config::parse(toml).unwrap();
     assert_eq!(config.server.bind.to_string(), "127.0.0.1:1883");
 }
 
@@ -151,7 +151,7 @@ publish = []
 subscribe = ["$SYS/broker/+"]
 "##;
 
-    let config = Config::from_str(toml).unwrap();
+    let config = Config::parse(toml).unwrap();
     assert_eq!(config.server.workers, 4);
     assert_eq!(config.limits.max_connections, 50000);
     assert_eq!(config.limits.max_inflight, 16);
@@ -171,7 +171,7 @@ fn test_invalid_max_qos() {
 max_qos = 3
 "#;
 
-    let result = Config::from_str(toml);
+    let result = Config::parse(toml);
     assert!(result.is_err());
 }
 
@@ -182,7 +182,7 @@ fn test_invalid_max_inflight() {
 max_inflight = 0
 "#;
 
-    let result = Config::from_str(toml);
+    let result = Config::parse(toml);
     assert!(result.is_err());
 }
 
@@ -201,7 +201,7 @@ role = "nonexistent_role"
 enabled = true
 "#;
 
-    let result = Config::from_str(toml);
+    let result = Config::parse(toml);
     assert!(result.is_err());
 }
 
@@ -222,7 +222,7 @@ publish = ["sensors/#"]
 subscribe = ["commands/#"]
 "##;
 
-    let config = Config::from_str(toml).unwrap();
+    let config = Config::parse(toml).unwrap();
     let role_map = config.build_role_map();
     assert!(role_map.contains_key("admin"));
     assert!(role_map.contains_key("device"));
@@ -244,7 +244,7 @@ username = "bob"
 password = "pass2"
 "#;
 
-    let config = Config::from_str(toml).unwrap();
+    let config = Config::parse(toml).unwrap();
     let user_map = config.build_user_map();
     assert!(user_map.contains_key("alice"));
     assert!(user_map.contains_key("bob"));
@@ -273,7 +273,7 @@ retain = true
 qos = 1
 "##;
 
-    let config = Config::from_str(toml).unwrap();
+    let config = Config::parse(toml).unwrap();
     assert_eq!(config.bridge.len(), 1);
     assert_eq!(config.bridge[0].name, "node1");
     assert_eq!(config.bridge[0].address, "node1:1883");

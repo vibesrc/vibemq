@@ -1,5 +1,7 @@
 //! Simple MQTT connection test
 
+#![allow(clippy::vec_init_then_push)]
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 

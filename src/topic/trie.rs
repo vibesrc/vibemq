@@ -69,7 +69,7 @@ impl<V> TopicTrie<V> {
                 node = node
                     .children
                     .entry(level.to_string())
-                    .or_insert_with(TrieNode::new);
+                    .or_default();
             }
 
             // If this is the last level, store the value

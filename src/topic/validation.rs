@@ -82,8 +82,8 @@ pub fn validate_topic_filter(filter: &str) -> Result<(), &'static str> {
     }
 
     // Handle shared subscription format: $share/{group}/{filter}
-    let actual_filter = if filter.starts_with("$share/") {
-        let rest = &filter[7..]; // Skip "$share/"
+    let actual_filter = if let Some(rest) = filter.strip_prefix("$share/") {
+        // Skip "$share/"
         if let Some(slash_pos) = rest.find('/') {
             let group = &rest[..slash_pos];
             let actual = &rest[slash_pos + 1..];
@@ -137,11 +137,10 @@ pub fn validate_topic_filter(filter: &str) -> Result<(), &'static str> {
 /// - $-topics don't match filters starting with + or #
 pub fn topic_matches_filter(topic: &str, filter: &str) -> bool {
     // Topics starting with $ don't match filters starting with + or #
-    if topic.starts_with('$') {
-        if filter.starts_with('+') || filter.starts_with('#') {
+    if topic.starts_with('$')
+        && (filter.starts_with('+') || filter.starts_with('#')) {
             return false;
         }
-    }
 
     let topic_levels: Vec<&str> = topic.split('/').collect();
     let filter_levels: Vec<&str> = filter.split('/').collect();

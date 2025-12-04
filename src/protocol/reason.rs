@@ -7,8 +7,10 @@ use std::fmt;
 /// MQTT v5.0 Reason Code
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum ReasonCode {
     /// Success / Normal disconnection / Granted QoS 0
+    #[default]
     Success = 0x00,
     /// Granted QoS 1
     GrantedQoS1 = 0x01,
@@ -186,11 +188,6 @@ impl ReasonCode {
     }
 }
 
-impl Default for ReasonCode {
-    fn default() -> Self {
-        ReasonCode::Success
-    }
-}
 
 impl fmt::Display for ReasonCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
