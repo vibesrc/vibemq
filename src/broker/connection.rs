@@ -1312,9 +1312,9 @@ where
         self.connections.remove(client_id);
 
         // Remove subscriptions if clean start
-        let (clean_start, will) = {
+        let (clean_start, will, will_delay_interval) = {
             let s = session.read();
-            (s.clean_start, s.will.clone())
+            (s.clean_start, s.will.clone(), s.will_delay_interval)
         };
 
         if clean_start {
@@ -1327,42 +1327,149 @@ where
         // Publish will message if needed
         if publish_will {
             if let Some(will) = will {
-                // TODO: Handle will delay interval
-                let publish = Publish {
-                    dup: false,
-                    qos: will.qos,
-                    retain: will.retain,
-                    topic: will.topic.clone(),
-                    packet_id: None,
-                    payload: will.payload,
-                    properties: will.properties,
-                };
+                if will_delay_interval > 0 {
+                    // Spawn delayed will publish task
+                    let session = session.clone();
+                    let client_id = client_id.clone();
+                    let retained = self.retained.clone();
+                    let subscriptions = self.subscriptions.clone();
+                    let connections = self.connections.clone();
+                    let sessions = self.sessions.clone();
+                    let config = self.config.clone();
+                    let events = self.events.clone();
+                    let delay = Duration::from_secs(will_delay_interval as u64);
 
-                // Handle retained
-                if will.retain && self.config.retain_available {
-                    if publish.payload.is_empty() {
-                        self.retained.remove(&will.topic);
-                    } else {
-                        self.retained.insert(
-                            will.topic.clone(),
-                            RetainedMessage {
-                                topic: will.topic.clone(),
-                                payload: publish.payload.clone(),
-                                qos: publish.qos,
-                                properties: publish.properties.clone(),
-                                timestamp: Instant::now(),
-                            },
-                        );
+                    // Capture the disconnect timestamp to detect reconnect+disconnect cycles
+                    let disconnected_at = {
+                        let s = session.read();
+                        s.disconnected_at
+                    };
+
+                    tokio::spawn(async move {
+                        tokio::time::sleep(delay).await;
+
+                        // Check if:
+                        // 1. This session is still the active session (not replaced by clean_start=true)
+                        // 2. Session is still disconnected from the SAME disconnect event
+                        // 3. Will is still pending
+                        let should_publish = {
+                            // First check if this session is still the active one in the store
+                            let is_current_session = sessions
+                                .get(client_id.as_ref())
+                                .map(|s| Arc::ptr_eq(&s, &session))
+                                .unwrap_or(false);
+
+                            if !is_current_session {
+                                false
+                            } else {
+                                let s = session.read();
+                                s.state == crate::session::SessionState::Disconnected
+                                    && s.will.is_some()
+                                    && s.disconnected_at == disconnected_at
+                            }
+                        };
+
+                        if should_publish {
+                            // Take the will from the session
+                            let will = {
+                                let mut s = session.write();
+                                s.will.take()
+                            };
+
+                            if let Some(will) = will {
+                                debug!(
+                                    "Publishing delayed will message for {} to {}",
+                                    client_id, will.topic
+                                );
+
+                                let publish = Publish {
+                                    dup: false,
+                                    qos: will.qos,
+                                    retain: will.retain,
+                                    topic: will.topic.clone(),
+                                    packet_id: None,
+                                    payload: will.payload,
+                                    properties: will.properties,
+                                };
+
+                                // Handle retained
+                                if will.retain && config.retain_available {
+                                    if publish.payload.is_empty() {
+                                        retained.remove(&will.topic);
+                                    } else {
+                                        retained.insert(
+                                            will.topic.clone(),
+                                            RetainedMessage {
+                                                topic: will.topic.clone(),
+                                                payload: publish.payload.clone(),
+                                                qos: publish.qos,
+                                                properties: publish.properties.clone(),
+                                                timestamp: Instant::now(),
+                                            },
+                                        );
+                                    }
+                                }
+
+                                // Route will message to subscribers
+                                let _ = route_will_message(
+                                    &subscriptions,
+                                    &connections,
+                                    &sessions,
+                                    &events,
+                                    &client_id,
+                                    &publish,
+                                )
+                                .await;
+                            }
+                        } else {
+                            debug!(
+                                "Skipping delayed will for {} (client reconnected or will cleared)",
+                                client_id
+                            );
+                        }
+                    });
+                } else {
+                    // Publish immediately (no delay)
+                    let publish = Publish {
+                        dup: false,
+                        qos: will.qos,
+                        retain: will.retain,
+                        topic: will.topic.clone(),
+                        packet_id: None,
+                        payload: will.payload,
+                        properties: will.properties,
+                    };
+
+                    // Handle retained
+                    if will.retain && self.config.retain_available {
+                        if publish.payload.is_empty() {
+                            self.retained.remove(&will.topic);
+                        } else {
+                            self.retained.insert(
+                                will.topic.clone(),
+                                RetainedMessage {
+                                    topic: will.topic.clone(),
+                                    payload: publish.payload.clone(),
+                                    qos: publish.qos,
+                                    properties: publish.properties.clone(),
+                                    timestamp: Instant::now(),
+                                },
+                            );
+                        }
+                    }
+
+                    // Route will message
+                    let _ = self.route_message(client_id, &publish).await;
+
+                    // Clear will from session (only when publishing immediately)
+                    {
+                        let mut s = session.write();
+                        s.will = None;
                     }
                 }
-
-                // Route will message
-                let _ = self.route_message(client_id, &publish).await;
             }
-        }
-
-        // Clear will from session
-        {
+        } else {
+            // Normal disconnect - clear will from session
             let mut s = session.write();
             s.will = None;
         }
@@ -1394,4 +1501,96 @@ impl BytesMutExt for BytesMut {
     fn advance(&mut self, cnt: usize) {
         bytes::Buf::advance(self, cnt);
     }
+}
+
+/// Route a will message to subscribers (standalone function for delayed will tasks)
+async fn route_will_message(
+    subscriptions: &SubscriptionStore,
+    connections: &DashMap<Arc<str>, mpsc::Sender<Packet>>,
+    sessions: &SessionStore,
+    events: &broadcast::Sender<BrokerEvent>,
+    sender_id: &Arc<str>,
+    publish: &Publish,
+) -> Result<(), ConnectionError> {
+    let matches = subscriptions.matches(&publish.topic);
+
+    // Deduplicate by client_id, keeping highest QoS and collecting ALL subscription IDs
+    struct ClientSub {
+        qos: QoS,
+        retain_as_published: bool,
+        subscription_ids: Vec<u32>,
+    }
+    let mut client_subs: HashMap<Arc<str>, ClientSub> = HashMap::new();
+    for sub in matches {
+        // Skip sender if no_local is set
+        if sub.no_local && sub.client_id == *sender_id {
+            continue;
+        }
+
+        let entry = client_subs
+            .entry(sub.client_id.clone())
+            .or_insert(ClientSub {
+                qos: QoS::AtMostOnce,
+                retain_as_published: false,
+                subscription_ids: Vec::new(),
+            });
+
+        // Update QoS to highest
+        if sub.qos > entry.qos {
+            entry.qos = sub.qos;
+        }
+
+        // If ANY matching subscription has retain_as_published=true, preserve retain flag
+        if sub.retain_as_published {
+            entry.retain_as_published = true;
+        }
+
+        // Collect ALL subscription identifiers
+        if let Some(id) = sub.subscription_id {
+            if !entry.subscription_ids.contains(&id) {
+                entry.subscription_ids.push(id);
+            }
+        }
+    }
+
+    // Send to each client
+    for (client_id, sub_info) in client_subs {
+        let effective_qos = publish.qos.min(sub_info.qos);
+
+        let mut outgoing = publish.clone();
+        outgoing.qos = effective_qos;
+        outgoing.dup = false;
+
+        // Clear retain flag unless retain_as_published
+        if !sub_info.retain_as_published {
+            outgoing.retain = false;
+        }
+
+        // Add ALL subscription identifiers
+        for id in sub_info.subscription_ids {
+            outgoing.properties.subscription_identifiers.push(id);
+        }
+
+        if let Some(sender) = connections.get(&client_id) {
+            let _ = sender.try_send(Packet::Publish(outgoing));
+        } else {
+            // Client disconnected, queue message if persistent session
+            if let Some(session) = sessions.get(client_id.as_ref()) {
+                let mut s = session.write();
+                if !s.clean_start {
+                    s.queue_message(outgoing);
+                }
+            }
+        }
+    }
+
+    // Notify event subscribers (for bridge forwarding and monitoring)
+    let _ = events.send(BrokerEvent::MessagePublished {
+        topic: publish.topic.clone(),
+        payload: publish.payload.clone(),
+        qos: publish.qos,
+        retain: publish.retain,
+    });
+
+    Ok(())
 }
