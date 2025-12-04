@@ -12,7 +12,7 @@ categories = ["network-programming"]
 [features]
 default = []
 tls = ["tokio-rustls", "rustls-pemfile"]
-pprof = ["dep:pprof"]
+pprof = ["dep:pprof", "dep:uuid", "dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl", "dep:tikv-jemalloc-sys"]
 
 [dependencies]
 # Async runtime - required for high-performance I/O
@@ -68,6 +68,10 @@ http-body-util = "0.1"
 
 # Profiling (optional)
 pprof = { version = "0.14", features = ["flamegraph", "prost-codec"], optional = true }
+uuid = { version = "1.11", features = ["v4"], optional = true }
+tikv-jemallocator = { version = "0.6", features = ["profiling"], optional = true }
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
+tikv-jemalloc-sys = { version = "0.6", features = ["profiling"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

@@ -12,6 +12,11 @@
 //!   -l, --log-level        Log level (error, warn, info, debug, trace)
 //!   -h, --help             Print help
 
+// Use jemalloc for heap profiling when pprof feature is enabled
+#[cfg(feature = "pprof")]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
