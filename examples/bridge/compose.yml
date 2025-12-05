@@ -1,13 +1,13 @@
 services:
   node1:
-    image: ghcr.io/bromq-dev/vibemq:latest
+    image: ghcr.io/vibesrc/vibemq:latest
     build:
       context: ../..
     ports:
       - 1883:1883
 
   node2:
-    image: ghcr.io/bromq-dev/vibemq:latest
+    image: ghcr.io/vibesrc/vibemq:latest
     build:
       context: ../..
     ports:

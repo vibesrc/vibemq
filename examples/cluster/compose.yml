@@ -1,6 +1,6 @@
 services:
   vibemq:
-    image: ghcr.io/bromq-dev/vibemq:latest
+    image: ghcr.io/vibesrc/vibemq:latest
     build:
       context: ../..
     deploy:

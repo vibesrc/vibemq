@@ -102,7 +102,7 @@ spec:
     spec:
       containers:
         - name: vibemq
-          image: ghcr.io/bromq-dev/vibemq:latest
+          image: ghcr.io/vibesrc/vibemq:latest
           ports:
             - name: mqtt
               containerPort: 1883
