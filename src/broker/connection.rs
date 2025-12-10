@@ -422,23 +422,58 @@ where
             protocol_version,
         });
 
-        // Send pending messages
+        // Send pending messages (respecting send quota per MQTT-4.9.0-2
+        // and max packet size per MQTT-3.1.2-24)
         {
-            let pending = {
+            let (pending, max_packet_size) = {
                 let mut s = session.write();
-                s.drain_pending_messages()
+                (s.drain_pending_messages(), s.max_packet_size)
             };
 
             for mut publish in pending {
                 if publish.qos != QoS::AtMostOnce {
                     let mut s = session.write();
+                    if !s.decrement_send_quota() {
+                        // Quota exhausted - re-queue remaining messages
+                        s.queue_message(publish);
+                        continue;
+                    }
                     publish.packet_id = Some(s.next_packet_id());
+                    // Store inflight for retry
+                    if let Some(packet_id) = publish.packet_id {
+                        s.inflight_outgoing.insert(
+                            packet_id,
+                            InflightMessage {
+                                packet_id,
+                                publish: publish.clone(),
+                                qos2_state: if publish.qos == QoS::ExactlyOnce {
+                                    Some(Qos2State::WaitingPubRec)
+                                } else {
+                                    None
+                                },
+                                sent_at: Instant::now(),
+                                retry_count: 0,
+                            },
+                        );
+                    }
                 }
 
                 self.write_buf.clear();
                 self.encoder
                     .encode(&Packet::Publish(publish), &mut self.write_buf)
                     .map_err(|e| ConnectionError::Protocol(e.into()))?;
+
+                // Per MQTT v5.0 spec [MQTT-3.1.2-24]: MUST NOT send packets
+                // exceeding client's Maximum Packet Size
+                if self.write_buf.len() > max_packet_size as usize {
+                    warn!(
+                        "Dropping pending PUBLISH: encoded size {} exceeds client max {}",
+                        self.write_buf.len(),
+                        max_packet_size
+                    );
+                    continue;
+                }
+
                 self.stream.write_all(&self.write_buf).await?;
             }
         }
@@ -537,15 +572,30 @@ where
                             return Ok(());
                         }
                         Packet::Publish(mut publish) => {
-                            // Assign packet ID if needed
-                            if publish.qos != QoS::AtMostOnce && publish.packet_id.is_none() {
-                                let mut s = session.write();
-                                publish.packet_id = Some(s.next_packet_id());
-                            }
+                            // Get max packet size from session
+                            let max_packet_size = {
+                                let s = session.read();
+                                s.max_packet_size
+                            };
 
-                            // Store inflight for QoS > 0
+                            // Per MQTT v5.0 spec [MQTT-4.9.0-2]: MUST NOT send QoS>0
+                            // PUBLISH when send quota is 0
                             if publish.qos != QoS::AtMostOnce {
                                 let mut s = session.write();
+                                if !s.decrement_send_quota() {
+                                    // Quota exhausted - queue message for later delivery
+                                    debug!(
+                                        "Send quota exhausted for {}, queuing message",
+                                        s.client_id
+                                    );
+                                    s.queue_message(publish);
+                                    continue;
+                                }
+                                // Assign packet ID
+                                if publish.packet_id.is_none() {
+                                    publish.packet_id = Some(s.next_packet_id());
+                                }
+                                // Store inflight
                                 if let Some(packet_id) = publish.packet_id {
                                     s.inflight_outgoing.insert(packet_id, InflightMessage {
                                         packet_id,
@@ -564,6 +614,18 @@ where
                             self.write_buf.clear();
                             self.encoder.encode(&Packet::Publish(publish), &mut self.write_buf)
                                 .map_err(|e| ConnectionError::Protocol(e.into()))?;
+
+                            // Per MQTT v5.0 spec [MQTT-3.1.2-24]: MUST NOT send packets
+                            // exceeding client's Maximum Packet Size
+                            if self.write_buf.len() > max_packet_size as usize {
+                                warn!(
+                                    "Dropping PUBLISH: encoded size {} exceeds client max {}",
+                                    self.write_buf.len(),
+                                    max_packet_size
+                                );
+                                continue;
+                            }
+
                             self.stream.write_all(&self.write_buf).await?;
                         }
                         _ => {
@@ -630,8 +692,12 @@ where
                     "DISCONNECT from {} (reason: {:?})",
                     client_id, disconnect.reason_code
                 );
-                // Normal disconnect - don't publish will message
-                self.handle_disconnect(client_id, session, false).await;
+                // Per MQTT v5.0 spec [MQTT-3.1.2-10]:
+                // - Reason 0x00 (Normal): will message MUST be deleted, NOT published
+                // - Reason 0x04 (DisconnectWithWill): will message MUST still be published
+                let publish_will =
+                    disconnect.reason_code == crate::protocol::ReasonCode::DisconnectWithWill;
+                self.handle_disconnect(client_id, session, publish_will).await;
                 Err(ConnectionError::Shutdown)
             }
             _ => {

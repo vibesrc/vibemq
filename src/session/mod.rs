@@ -7,6 +7,9 @@
 //! - Uses AHashMap for faster hashing than std HashMap
 //! - Uses Arc<str> for subscription filter keys to share memory
 //! - Pre-allocates collections with reasonable capacity
+//!
+//! MQTT Compliance:
+//! - Implements message expiry per MQTT v5.0 spec [MQTT-3.3.2-5]
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -18,6 +21,15 @@ use dashmap::DashMap;
 use parking_lot::RwLock;
 
 use crate::protocol::{Properties, ProtocolVersion, Publish, QoS, SubscriptionOptions};
+
+/// A pending message with timestamp for expiry tracking
+#[derive(Debug, Clone)]
+pub struct PendingMessage {
+    /// The PUBLISH packet
+    pub publish: Publish,
+    /// When this message was queued
+    pub queued_at: Instant,
+}
 
 /// Session state
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,8 +101,8 @@ pub struct Session {
     pub inflight_incoming: AHashMap<u16, Qos2State>,
     /// Next packet identifier
     next_packet_id: u16,
-    /// Pending messages (queued while disconnected)
-    pub pending_messages: VecDeque<Publish>,
+    /// Pending messages (queued while disconnected) with expiry tracking
+    pub pending_messages: VecDeque<PendingMessage>,
     /// Maximum pending messages
     pub max_pending_messages: usize,
     /// Receive maximum (flow control)
@@ -218,13 +230,49 @@ impl Session {
             // Drop oldest message
             self.pending_messages.pop_front();
         }
-        self.pending_messages.push_back(publish);
+        self.pending_messages.push_back(PendingMessage {
+            publish,
+            queued_at: Instant::now(),
+        });
         true
     }
 
-    /// Get and remove pending messages
+    /// Get and remove pending messages, filtering expired ones per MQTT-3.3.2-5
+    /// Also updates message_expiry_interval to reflect time spent queued
     pub fn drain_pending_messages(&mut self) -> VecDeque<Publish> {
-        std::mem::take(&mut self.pending_messages)
+        let now = Instant::now();
+        let pending = std::mem::take(&mut self.pending_messages);
+
+        pending
+            .into_iter()
+            .filter_map(|mut pm| {
+                // Check if message has expired
+                if let Some(expiry) = pm.publish.properties.message_expiry_interval {
+                    let elapsed = now.duration_since(pm.queued_at).as_secs() as u32;
+                    if elapsed >= expiry {
+                        // Message expired - drop it per MQTT-3.3.2-5
+                        return None;
+                    }
+                    // Update expiry to reflect remaining time
+                    pm.publish.properties.message_expiry_interval = Some(expiry - elapsed);
+                }
+                Some(pm.publish)
+            })
+            .collect()
+    }
+
+    /// Remove expired messages from the pending queue
+    /// Called periodically to clean up expired messages
+    pub fn cleanup_expired_messages(&mut self) {
+        let now = Instant::now();
+        self.pending_messages.retain(|pm| {
+            if let Some(expiry) = pm.publish.properties.message_expiry_interval {
+                let elapsed = now.duration_since(pm.queued_at).as_secs() as u32;
+                elapsed < expiry
+            } else {
+                true // No expiry, keep the message
+            }
+        });
     }
 
     /// Add a subscription
@@ -378,10 +426,14 @@ impl SessionStore {
         }
     }
 
-    /// Clean up expired sessions
+    /// Clean up expired sessions and expired messages within sessions
+    /// Per MQTT v5.0 spec [MQTT-3.3.2-5]: expired messages MUST be deleted
     pub fn cleanup_expired(&self) {
         self.sessions.retain(|_, session| {
-            let s = session.read();
+            let mut s = session.write();
+            // Clean up expired messages in this session
+            s.cleanup_expired_messages();
+            // Return false to remove session if it's expired
             !s.is_expired()
         });
     }
@@ -399,5 +451,179 @@ impl SessionStore {
 impl Default for SessionStore {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::ProtocolVersion;
+    use std::thread;
+
+    /// Test MQTT-4.9.0-2: Send quota enforcement
+    #[test]
+    fn test_send_quota_enforcement() {
+        let mut session = Session::new("test".into(), ProtocolVersion::V5);
+
+        // Set receive_maximum to 2 (client can receive max 2 inflight QoS>0 messages)
+        session.receive_maximum = 2;
+        session.send_quota = 2;
+
+        // First two decrements should succeed
+        assert!(session.decrement_send_quota());
+        assert_eq!(session.send_quota, 1);
+        assert!(session.decrement_send_quota());
+        assert_eq!(session.send_quota, 0);
+
+        // Third decrement should fail (quota exhausted)
+        assert!(!session.decrement_send_quota());
+        assert_eq!(session.send_quota, 0);
+
+        // Increment quota (simulating PUBACK received)
+        session.increment_send_quota();
+        assert_eq!(session.send_quota, 1);
+
+        // Now we can send again
+        assert!(session.decrement_send_quota());
+        assert_eq!(session.send_quota, 0);
+    }
+
+    /// Test MQTT-3.3.2-5: Message expiry interval enforcement
+    #[test]
+    fn test_message_expiry_cleanup() {
+        let mut session = Session::new("test".into(), ProtocolVersion::V5);
+
+        // Create a message with 1 second expiry
+        let mut publish1 = Publish {
+            topic: "test/topic".to_string(),
+            payload: bytes::Bytes::from("test1"),
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            dup: false,
+            packet_id: None,
+            properties: Properties::default(),
+        };
+        publish1.properties.message_expiry_interval = Some(1); // 1 second
+
+        // Create a message with no expiry
+        let publish2 = Publish {
+            topic: "test/topic".to_string(),
+            payload: bytes::Bytes::from("test2"),
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            dup: false,
+            packet_id: None,
+            properties: Properties::default(),
+        };
+
+        // Create a message with long expiry
+        let mut publish3 = Publish {
+            topic: "test/topic".to_string(),
+            payload: bytes::Bytes::from("test3"),
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            dup: false,
+            packet_id: None,
+            properties: Properties::default(),
+        };
+        publish3.properties.message_expiry_interval = Some(3600); // 1 hour
+
+        session.queue_message(publish1);
+        session.queue_message(publish2);
+        session.queue_message(publish3);
+
+        assert_eq!(session.pending_messages.len(), 3);
+
+        // Wait for the short-expiry message to expire
+        thread::sleep(Duration::from_secs(2));
+
+        // Drain should filter out expired messages
+        let messages = session.drain_pending_messages();
+
+        // Should have 2 messages (the expired one is dropped)
+        assert_eq!(messages.len(), 2);
+
+        // Check that the remaining messages are correct
+        let payloads: Vec<_> = messages
+            .iter()
+            .map(|p| String::from_utf8_lossy(&p.payload).to_string())
+            .collect();
+        assert!(payloads.contains(&"test2".to_string()));
+        assert!(payloads.contains(&"test3".to_string()));
+        assert!(!payloads.contains(&"test1".to_string()));
+    }
+
+    /// Test that message expiry interval is decremented when draining
+    #[test]
+    fn test_message_expiry_interval_update() {
+        let mut session = Session::new("test".into(), ProtocolVersion::V5);
+
+        let mut publish = Publish {
+            topic: "test/topic".to_string(),
+            payload: bytes::Bytes::from("test"),
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            dup: false,
+            packet_id: None,
+            properties: Properties::default(),
+        };
+        publish.properties.message_expiry_interval = Some(10); // 10 seconds
+
+        session.queue_message(publish);
+
+        // Wait 2 seconds
+        thread::sleep(Duration::from_secs(2));
+
+        let messages = session.drain_pending_messages();
+        assert_eq!(messages.len(), 1);
+
+        // Expiry should be decremented (10 - 2 = 8, give or take)
+        let remaining = messages[0].properties.message_expiry_interval.unwrap();
+        assert!(remaining <= 8, "Expiry should be decremented: {}", remaining);
+        assert!(remaining >= 6, "Expiry should not be too low: {}", remaining);
+    }
+
+    /// Test cleanup_expired_messages removes expired messages
+    #[test]
+    fn test_cleanup_expired_messages() {
+        let mut session = Session::new("test".into(), ProtocolVersion::V5);
+
+        let mut publish1 = Publish {
+            topic: "test/topic".to_string(),
+            payload: bytes::Bytes::from("expires"),
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            dup: false,
+            packet_id: None,
+            properties: Properties::default(),
+        };
+        publish1.properties.message_expiry_interval = Some(1);
+
+        let publish2 = Publish {
+            topic: "test/topic".to_string(),
+            payload: bytes::Bytes::from("no_expiry"),
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            dup: false,
+            packet_id: None,
+            properties: Properties::default(),
+        };
+
+        session.queue_message(publish1);
+        session.queue_message(publish2);
+
+        assert_eq!(session.pending_messages.len(), 2);
+
+        // Wait for expiry
+        thread::sleep(Duration::from_secs(2));
+
+        // Cleanup should remove expired message
+        session.cleanup_expired_messages();
+
+        assert_eq!(session.pending_messages.len(), 1);
+        assert_eq!(
+            String::from_utf8_lossy(&session.pending_messages[0].publish.payload),
+            "no_expiry"
+        );
     }
 }
