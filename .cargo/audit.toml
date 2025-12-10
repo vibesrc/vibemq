@@ -1,0 +1,10 @@
+# cargo-audit configuration
+# https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+# Advisories to ignore (unmaintained crates with no security impact)
+ignore = [
+    # paste is unmaintained but has no vulnerabilities
+    # It's a transitive dependency from tikv-jemalloc-ctl
+    "RUSTSEC-2024-0436",
+]
