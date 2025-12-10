@@ -11,7 +11,6 @@ categories = ["network-programming"]
 
 [features]
 default = []
-tls = ["tokio-rustls"]
 pprof = ["dep:pprof", "dep:uuid", "dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl", "dep:tikv-jemalloc-sys"]
 
 [dependencies]
@@ -48,8 +47,8 @@ serde = { version = "1.0", features = ["derive"] }
 # Async trait support
 async-trait = "0.1"
 
-# Optional TLS support
-tokio-rustls = { version = "0.25", optional = true }
+# TLS support
+tokio-rustls = "0.26"
 
 # WebSocket support
 tokio-tungstenite = "0.24"

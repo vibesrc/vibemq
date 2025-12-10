@@ -150,6 +150,8 @@ pub struct ServerConfig {
     /// TCP bind address
     #[serde(default = "default_bind")]
     pub bind: SocketAddr,
+    /// TLS bind address (optional, enables MQTT over TLS)
+    pub tls_bind: Option<SocketAddr>,
     /// WebSocket bind address (optional)
     pub ws_bind: Option<SocketAddr>,
     /// WebSocket path (default: "/mqtt")
@@ -158,6 +160,23 @@ pub struct ServerConfig {
     /// Number of worker threads (0 = auto)
     #[serde(default)]
     pub workers: usize,
+    /// TLS configuration (required when tls_bind is set)
+    #[serde(default)]
+    pub tls: Option<ServerTlsConfig>,
+}
+
+/// TLS configuration for the server
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ServerTlsConfig {
+    /// Path to certificate file (PEM format)
+    pub cert: String,
+    /// Path to private key file (PEM format)
+    pub key: String,
+    /// Path to CA certificate file for client authentication (PEM format, optional)
+    pub ca_cert: Option<String>,
+    /// Require client certificate authentication
+    #[serde(default)]
+    pub require_client_cert: bool,
 }
 
 fn default_ws_path() -> String {
@@ -172,9 +191,11 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: default_bind(),
+            tls_bind: None,
             ws_bind: None,
             ws_path: default_ws_path(),
             workers: 0,
+            tls: None,
         }
     }
 }
@@ -499,6 +520,29 @@ impl Config {
                             user.username, role
                         )));
                     }
+                }
+            }
+        }
+
+        // Validate TLS configuration
+        if self.server.tls_bind.is_some() {
+            match &self.server.tls {
+                Some(tls) => {
+                    if tls.cert.is_empty() {
+                        return Err(ConfigError::Validation(
+                            "tls.cert is required when tls_bind is set".to_string(),
+                        ));
+                    }
+                    if tls.key.is_empty() {
+                        return Err(ConfigError::Validation(
+                            "tls.key is required when tls_bind is set".to_string(),
+                        ));
+                    }
+                }
+                None => {
+                    return Err(ConfigError::Validation(
+                        "tls configuration is required when tls_bind is set".to_string(),
+                    ));
                 }
             }
         }

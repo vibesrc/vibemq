@@ -8,7 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build
 cargo build                    # Debug build
 cargo build --release          # Release build (optimized, LTO enabled)
-cargo build --features tls     # Build with TLS support
 
 # Run
 cargo run                                # Run broker with defaults (0.0.0.0:1883)
@@ -59,13 +58,28 @@ The `spec/` directory contains markdown files documenting MQTT v3.1.1 and v5.0 p
 ## Configuration
 
 The broker accepts TOML config files. Key sections:
-- `[server]` - bind address, workers, WebSocket settings
+- `[server]` - bind address, workers, WebSocket settings, TLS configuration
+- `[server.tls]` - TLS certificate/key paths, client cert auth settings
 - `[limits]` - max connections, packet size, inflight messages
 - `[session]` - keep alive, topic aliases
 - `[mqtt]` - QoS limits, feature flags (retain, wildcards, shared subs)
 - `[auth]` - enable authentication, user list with roles
 - `[acl]` - enable ACL, role-based topic patterns
 - `[[bridge]]` - bridge connections to remote brokers with topic forwarding rules
+
+### TLS Configuration Example
+
+```toml
+[server]
+bind = "0.0.0.0:1883"
+tls_bind = "0.0.0.0:8883"  # Optional TLS listener
+
+[server.tls]
+cert = "/path/to/cert.pem"
+key = "/path/to/key.pem"
+ca_cert = "/path/to/ca.pem"  # Optional, for client cert auth
+require_client_cert = false   # Set true for mTLS
+```
 
 ## Bridging and Clustering
 

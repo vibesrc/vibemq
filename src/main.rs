@@ -28,7 +28,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use vibemq::acl::AclProvider;
 use vibemq::auth::AuthProvider;
-use vibemq::broker::{Broker, BrokerConfig};
+use vibemq::broker::{Broker, BrokerConfig, TlsConfig};
 use vibemq::config::Config;
 use vibemq::hooks::CompositeHooks;
 use vibemq::protocol::QoS;
@@ -171,6 +171,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // CLI args override file config
     let bind_addr = args.bind.unwrap_or(file_config.server.bind);
+    let tls_bind_addr = file_config.server.tls_bind;
+    let tls_config = file_config.server.tls.as_ref().map(|tls| TlsConfig {
+        cert_path: tls.cert.clone(),
+        key_path: tls.key.clone(),
+        ca_cert_path: tls.ca_cert.clone(),
+        require_client_cert: tls.require_client_cert,
+    });
     let ws_bind_addr = args.ws_bind.or(file_config.server.ws_bind);
     let max_connections = args
         .max_connections
@@ -219,6 +226,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build broker configuration
     let broker_config = BrokerConfig {
         bind_addr,
+        tls_bind_addr,
+        tls_config,
         ws_bind_addr,
         ws_path: file_config.server.ws_path.clone(),
         max_connections,
@@ -240,6 +249,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting VibeMQ MQTT Broker");
     info!("  Bind address: {}", broker_config.bind_addr);
+    if let Some(tls_addr) = &broker_config.tls_bind_addr {
+        info!("  TLS address: {}", tls_addr);
+    }
     if let Some(ws_addr) = &broker_config.ws_bind_addr {
         info!("  WebSocket address: {}", ws_addr);
     }

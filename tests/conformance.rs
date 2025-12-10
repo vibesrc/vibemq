@@ -33,6 +33,8 @@ fn next_port() -> u16 {
 fn test_config(port: u16) -> BrokerConfig {
     BrokerConfig {
         bind_addr: SocketAddr::from(([127, 0, 0, 1], port)),
+        tls_bind_addr: None,
+        tls_config: None,
         ws_bind_addr: None,
         ws_path: "/mqtt".to_string(),
         max_connections: 100,

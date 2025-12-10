@@ -5,9 +5,11 @@
 
 mod connection;
 mod router;
+mod tls;
 
 pub use connection::Connection;
 pub use router::MessageRouter;
+pub use tls::load_tls_config;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -34,6 +36,10 @@ use crate::transport::WsStream;
 pub struct BrokerConfig {
     /// TCP bind address
     pub bind_addr: SocketAddr,
+    /// TLS bind address (optional)
+    pub tls_bind_addr: Option<SocketAddr>,
+    /// TLS configuration
+    pub tls_config: Option<TlsConfig>,
     /// WebSocket bind address (optional)
     pub ws_bind_addr: Option<SocketAddr>,
     /// WebSocket path (default: "/mqtt")
@@ -66,10 +72,25 @@ pub struct BrokerConfig {
     pub num_workers: usize,
 }
 
+/// TLS configuration for the broker
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    /// Path to certificate file (PEM format)
+    pub cert_path: String,
+    /// Path to private key file (PEM format)
+    pub key_path: String,
+    /// Path to CA certificate file for client authentication (optional)
+    pub ca_cert_path: Option<String>,
+    /// Require client certificate authentication
+    pub require_client_cert: bool,
+}
+
 impl Default for BrokerConfig {
     fn default() -> Self {
         Self {
             bind_addr: "0.0.0.0:1883".parse().unwrap(),
+            tls_bind_addr: None,
+            tls_config: None,
             ws_bind_addr: None,
             ws_path: "/mqtt".to_string(),
             max_connections: 100_000,
@@ -471,6 +492,102 @@ impl Broker {
                         }
                         Err(e) => {
                             error!("Failed to accept WebSocket connection: {}", e);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Spawn TLS listener if configured
+        if let (Some(tls_addr), Some(tls_config)) =
+            (self.config.tls_bind_addr, &self.config.tls_config)
+        {
+            let tls_acceptor = match load_tls_config(tls_config) {
+                Ok(acceptor) => acceptor,
+                Err(e) => {
+                    error!("Failed to load TLS configuration: {}", e);
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("TLS configuration error: {}", e),
+                    ));
+                }
+            };
+
+            let tls_listener = TcpListener::bind(tls_addr).await?;
+            info!("MQTT/TLS listening on {}", tls_addr);
+
+            let sessions = self.sessions.clone();
+            let subscriptions = self.subscriptions.clone();
+            let retained = self.retained.clone();
+            let connections = self.connections.clone();
+            let config = self.config.clone();
+            let events = self.events.clone();
+            let shutdown = self.shutdown.clone();
+            let hooks = self.hooks.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    match tls_listener.accept().await {
+                        Ok((stream, addr)) => {
+                            debug!("New TLS connection from {}", addr);
+                            let sessions = sessions.clone();
+                            let subscriptions = subscriptions.clone();
+                            let retained = retained.clone();
+                            let connections = connections.clone();
+                            let config = config.clone();
+                            let events = events.clone();
+                            let hooks = hooks.clone();
+                            let tls_acceptor = tls_acceptor.clone();
+                            let mut shutdown_rx = shutdown.subscribe();
+
+                            tokio::spawn(async move {
+                                // Perform TLS handshake
+                                match tls_acceptor.accept(stream).await {
+                                    Ok(tls_stream) => {
+                                        debug!("TLS handshake complete for {}", addr);
+                                        let mut conn = Connection::new(
+                                            tls_stream,
+                                            addr,
+                                            sessions,
+                                            subscriptions,
+                                            retained,
+                                            connections,
+                                            config,
+                                            events,
+                                            hooks,
+                                        );
+
+                                        let conn_fut = conn.run();
+                                        tokio::pin!(conn_fut);
+
+                                        loop {
+                                            tokio::select! {
+                                                biased;
+
+                                                result = &mut conn_fut => {
+                                                    if let Err(e) = result {
+                                                        debug!("TLS connection error from {}: {}", addr, e);
+                                                    }
+                                                    break;
+                                                }
+                                                result = shutdown_rx.recv() => {
+                                                    match result {
+                                                        Ok(()) => break,
+                                                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        debug!("TLS handshake failed for {}: {}", addr, e);
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            error!("Failed to accept TLS connection: {}", e);
                         }
                     }
                 }
