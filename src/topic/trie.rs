@@ -77,10 +77,7 @@ impl<V> TopicTrie<V> {
                 node = node.single_wildcard.as_mut().unwrap();
             } else {
                 // Normal level - use CompactString for efficient storage
-                node = node
-                    .children
-                    .entry(CompactString::new(level))
-                    .or_default();
+                node = node.children.entry(CompactString::new(level)).or_default();
             }
 
             // If this is the last level, store the value

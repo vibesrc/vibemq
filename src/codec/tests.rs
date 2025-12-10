@@ -712,7 +712,7 @@ fn test_subscribe_v5_parses_all_options() {
     let raw = [
         0x82, 0x0A, // SUBSCRIBE with correct flags, remaining length = 10
         0x00, 0x01, // packet ID = 1
-        0x00,       // properties length = 0
+        0x00, // properties length = 0
         0x00, 0x04, b't', b'e', b's', b't', // topic "test"
         0x2E, // QoS 2 + no_local (0x04) + retain_as_published (0x08) + retain_handling=2 (0x20)
     ];
@@ -739,13 +739,16 @@ fn test_subscribe_v5_rejects_reserved_bits() {
     let raw = [
         0x82, 0x0A, // SUBSCRIBE with correct flags, remaining length = 10
         0x00, 0x01, // packet ID = 1
-        0x00,       // properties length = 0
+        0x00, // properties length = 0
         0x00, 0x04, b't', b'e', b's', b't', // topic "test"
         0xC2, // QoS 2 + reserved bits 6-7 set (invalid)
     ];
 
     let result = decode_packet(&raw, Some(ProtocolVersion::V5));
-    assert!(matches!(result, Err(DecodeError::InvalidSubscriptionOptions)));
+    assert!(matches!(
+        result,
+        Err(DecodeError::InvalidSubscriptionOptions)
+    ));
 }
 
 // ============================================================================

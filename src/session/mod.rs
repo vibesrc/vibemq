@@ -579,8 +579,16 @@ mod tests {
 
         // Expiry should be decremented (10 - 2 = 8, give or take)
         let remaining = messages[0].properties.message_expiry_interval.unwrap();
-        assert!(remaining <= 8, "Expiry should be decremented: {}", remaining);
-        assert!(remaining >= 6, "Expiry should not be too low: {}", remaining);
+        assert!(
+            remaining <= 8,
+            "Expiry should be decremented: {}",
+            remaining
+        );
+        assert!(
+            remaining >= 6,
+            "Expiry should not be too low: {}",
+            remaining
+        );
     }
 
     /// Test cleanup_expired_messages removes expired messages

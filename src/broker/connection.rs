@@ -697,7 +697,8 @@ where
                 // - Reason 0x04 (DisconnectWithWill): will message MUST still be published
                 let publish_will =
                     disconnect.reason_code == crate::protocol::ReasonCode::DisconnectWithWill;
-                self.handle_disconnect(client_id, session, publish_will).await;
+                self.handle_disconnect(client_id, session, publish_will)
+                    .await;
                 Err(ConnectionError::Shutdown)
             }
             _ => {
