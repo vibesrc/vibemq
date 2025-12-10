@@ -83,33 +83,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build release
-        run: cargo build --release
-      - name: Install testmqtt
-        run: make install-testmqtt
       - name: Run conformance tests
-        run: |
-          # Start broker in background
-          ./target/release/vibemq -b 127.0.0.1:1883 &
-          BROKER_PID=$!
-          sleep 2
-
-          # Run v3.1.1 tests
-          echo "=== MQTT v3.1.1 Conformance Tests ==="
-          ./bin/testmqtt conformance --version 3 --broker tcp://127.0.0.1:1883 --verbose || V3_FAILED=1
-
-          # Run v5.0 tests
-          echo "=== MQTT v5.0 Conformance Tests ==="
-          ./bin/testmqtt conformance --version 5 --broker tcp://127.0.0.1:1883 --verbose || V5_FAILED=1
-
-          # Stop broker
-          kill $BROKER_PID 2>/dev/null || true
-
-          # Check results
-          if [ -n "$V3_FAILED" ] || [ -n "$V5_FAILED" ]; then
-            echo "Some conformance tests failed"
-            exit 1
-          fi
+        run: make conformance-ci
 
   docker:
     name: Docker Build
