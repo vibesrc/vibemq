@@ -245,6 +245,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         shared_subscriptions_available: file_config.mqtt.shared_subscriptions,
         max_topic_alias,
         num_workers,
+        sys_topics_enabled: file_config.mqtt.sys_topics,
+        sys_topics_interval: Duration::from_secs(file_config.mqtt.sys_interval),
     };
 
     info!("Starting VibeMQ MQTT Broker");

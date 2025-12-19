@@ -41,6 +41,9 @@ max_awaiting_rel = 100
 # Seconds before retrying unacked messages
 retry_interval = 30
 
+[metrics]
+enabled = true
+
 [session]
 # Default keep alive in seconds
 default_keep_alive = 60
@@ -62,6 +65,10 @@ wildcard_subscriptions = true
 subscription_identifiers = true
 # Whether shared subscriptions are available
 shared_subscriptions = true
+# Whether to publish $SYS/# broker statistics topics
+sys_topics = true
+# $SYS topic publish interval in seconds
+sys_interval = 10
 
 # Authentication configuration
 [auth]
@@ -71,15 +78,19 @@ enabled = false
 allow_anonymous = true
 
 # Static user list (uncomment and customize)
+# Use either "password" (plaintext) OR "password_hash" (argon2) per user
+#
 # [[auth.users]]
 # username = "admin"
-# password = "admin_password"
+# password = "${ADMIN_PASSWORD}"  # Plaintext, supports env vars
 # role = "admin"  # ACL role reference
-
+#
 # [[auth.users]]
 # username = "sensor1"
-# password = "sensor_password"
+# password_hash = "${SENSOR1_PASSWORD_HASH}"  # Argon2 hash from env var
 # role = "device"
+#
+# Generate password hashes with: echo -n "password" | argon2 salt -id -e
 
 # Access Control List configuration
 [acl]
@@ -105,8 +116,8 @@ enabled = false
 # Default permissions for users without explicit role (including anonymous)
 # %c = client_id, %u = username substitution works here
 [acl.default]
-publish = []
-subscribe = ["public/#", "$SYS/broker/+"]
+publish = ["#"]
+subscribe = ["#", "$SYS/#"]
 
 # Bridge configuration
 # Bridges forward messages between this broker and remote MQTT brokers

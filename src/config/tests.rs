@@ -130,7 +130,7 @@ role = "admin"
 
 [[auth.users]]
 username = "sensor1"
-password = "sensor_pass"
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$3QUugnyLZGsTrETNoga03Q$Tnmpw8w1t/PzI36MTps259IB7ntGAb4NA0KlYD9Yzlw"
 role = "device"
 
 [acl]
@@ -159,7 +159,9 @@ subscribe = ["$SYS/broker/+"]
     assert!(!config.auth.allow_anonymous);
     assert_eq!(config.auth.users.len(), 2);
     assert_eq!(config.auth.users[0].username, "admin");
-    assert_eq!(config.auth.users[0].password, "secret123");
+    assert_eq!(config.auth.users[0].password, Some("secret123".to_string()));
+    assert_eq!(config.auth.users[1].username, "sensor1");
+    assert!(config.auth.users[1].password_hash.is_some());
     assert!(config.acl.enabled);
     assert_eq!(config.acl.roles.len(), 2);
 }
@@ -248,7 +250,93 @@ password = "pass2"
     let user_map = config.build_user_map();
     assert!(user_map.contains_key("alice"));
     assert!(user_map.contains_key("bob"));
-    assert_eq!(user_map.get("alice").unwrap().password, "pass1");
+    assert_eq!(
+        user_map.get("alice").unwrap().password,
+        Some("pass1".to_string())
+    );
+}
+
+#[test]
+fn test_user_missing_password_and_hash() {
+    let toml = r#"
+[auth]
+enabled = true
+
+[[auth.users]]
+username = "admin"
+"#;
+
+    let result = Config::parse(toml);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("must have either 'password' or 'password_hash'"));
+}
+
+#[test]
+fn test_user_both_password_and_hash() {
+    let toml = r#"
+[auth]
+enabled = true
+
+[[auth.users]]
+username = "admin"
+password = "plaintext"
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$3QUugnyLZGsTrETNoga03Q$Tnmpw8w1t/PzI36MTps259IB7ntGAb4NA0KlYD9Yzlw"
+"#;
+
+    let result = Config::parse(toml);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("cannot have both"));
+}
+
+#[test]
+fn test_user_invalid_hash_format() {
+    let toml = r#"
+[auth]
+enabled = true
+
+[[auth.users]]
+username = "admin"
+password_hash = "not-a-valid-hash"
+"#;
+
+    let result = Config::parse(toml);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("invalid password_hash format"));
+}
+
+#[test]
+fn test_user_empty_password() {
+    let toml = r#"
+[auth]
+enabled = true
+
+[[auth.users]]
+username = "admin"
+password = ""
+"#;
+
+    let result = Config::parse(toml);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("empty password"));
+}
+
+#[test]
+fn test_user_valid_password_hash() {
+    let toml = r#"
+[auth]
+enabled = true
+
+[[auth.users]]
+username = "admin"
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$3QUugnyLZGsTrETNoga03Q$Tnmpw8w1t/PzI36MTps259IB7ntGAb4NA0KlYD9Yzlw"
+"#;
+
+    let result = Config::parse(toml);
+    assert!(result.is_ok());
 }
 
 #[test]

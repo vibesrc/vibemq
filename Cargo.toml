@@ -32,6 +32,7 @@ parking_lot = "0.12"
 # Hashing
 ahash = "0.8"
 fnv = "1.0"
+argon2 = "0.5"
 
 # Performance optimizations - inline small collections and strings
 smallvec = "1.13"

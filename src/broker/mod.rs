@@ -5,6 +5,7 @@
 
 mod connection;
 mod router;
+mod sys_topics;
 mod tls;
 
 pub use connection::Connection;
@@ -70,6 +71,10 @@ pub struct BrokerConfig {
     pub max_topic_alias: u16,
     /// Number of worker tasks
     pub num_workers: usize,
+    /// Enable $SYS topic publishing
+    pub sys_topics_enabled: bool,
+    /// $SYS topic publish interval
+    pub sys_topics_interval: Duration,
 }
 
 /// TLS configuration for the broker
@@ -106,6 +111,8 @@ impl Default for BrokerConfig {
             shared_subscriptions_available: true,
             max_topic_alias: 65535,
             num_workers: num_cpus::get(),
+            sys_topics_enabled: true,
+            sys_topics_interval: Duration::from_secs(10),
         }
     }
 }
@@ -212,6 +219,23 @@ impl Broker {
     /// Get metrics (if enabled)
     pub fn metrics(&self) -> Option<&Arc<Metrics>> {
         self.metrics.as_ref()
+    }
+
+    /// Clone broker for $SYS topics task (only needs publish capability)
+    fn clone_for_sys_topics(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            sessions: self.sessions.clone(),
+            subscriptions: self.subscriptions.clone(),
+            retained: self.retained.clone(),
+            connections: self.connections.clone(),
+            shutdown: self.shutdown.clone(),
+            events: self.events.clone(),
+            hooks: self.hooks.clone(),
+            bridge_manager: None,
+            cluster_manager: None,
+            metrics: None,
+        }
     }
 
     /// Set the bridge manager for this broker
@@ -780,6 +804,27 @@ impl Broker {
                     }
                 }
             });
+        }
+
+        // Spawn $SYS topics publishing task if enabled
+        if self.config.sys_topics_enabled {
+            let broker = Arc::new(self.clone_for_sys_topics());
+            let metrics = self.metrics.clone();
+            let interval_secs = self.config.sys_topics_interval.as_secs();
+            let start_time = Instant::now();
+            let shutdown_rx = self.shutdown.subscribe();
+
+            info!(
+                "Starting $SYS topics publisher (interval={}s)",
+                interval_secs
+            );
+            sys_topics::spawn_sys_topics_task(
+                broker,
+                metrics,
+                interval_secs,
+                start_time,
+                shutdown_rx,
+            );
         }
 
         debug!("Starting TCP accept loop");

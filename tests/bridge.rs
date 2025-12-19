@@ -47,6 +47,8 @@ fn test_broker_config(port: u16) -> BrokerConfig {
         shared_subscriptions_available: true,
         max_topic_alias: 65535,
         num_workers: 2,
+        sys_topics_enabled: false,
+        sys_topics_interval: Duration::from_secs(10),
     }
 }
 

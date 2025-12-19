@@ -1,10 +1,13 @@
 //! Authentication Module
 //!
-//! Provides username/password authentication with plaintext password storage.
+//! Provides username/password authentication with support for:
+//! - Plaintext passwords (for development/testing)
+//! - Argon2 password hashes (recommended for production)
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
@@ -26,10 +29,18 @@ pub struct AuthProvider {
     client_usernames: Arc<RwLock<HashMap<String, Option<String>>>>,
 }
 
+/// Credential storage type
+enum Credential {
+    /// Plaintext password (for development/testing)
+    Plaintext(String),
+    /// Argon2 password hash (for production)
+    Argon2Hash(String),
+}
+
 /// Internal user entry
 struct UserEntry {
-    /// Password (plaintext)
-    password: String,
+    /// User credential (plaintext or hash)
+    credential: Credential,
     /// ACL role (if any)
     role: Option<String>,
 }
@@ -40,10 +51,19 @@ impl AuthProvider {
         let mut users = HashMap::new();
 
         for user in &config.users {
+            let credential = if let Some(ref hash) = user.password_hash {
+                Credential::Argon2Hash(hash.clone())
+            } else if let Some(ref pwd) = user.password {
+                Credential::Plaintext(pwd.clone())
+            } else {
+                // This shouldn't happen if config validation is done
+                continue;
+            };
+
             users.insert(
                 user.username.clone(),
                 UserEntry {
-                    password: user.password.clone(),
+                    credential,
                     role: user.role.clone(),
                 },
             );
@@ -75,12 +95,25 @@ impl AuthProvider {
             .and_then(|u| u.clone())
     }
 
-    /// Verify a password against stored password
-    fn verify_password(&self, password: &[u8], stored: &str) -> bool {
-        // Convert password bytes to string and compare
-        match std::str::from_utf8(password) {
-            Ok(pwd) => pwd == stored,
-            Err(_) => false,
+    /// Verify a password against stored credential
+    fn verify_password(&self, password: &[u8], credential: &Credential) -> bool {
+        match credential {
+            Credential::Plaintext(stored) => {
+                // Compare plaintext password
+                match std::str::from_utf8(password) {
+                    Ok(pwd) => pwd == stored,
+                    Err(_) => false,
+                }
+            }
+            Credential::Argon2Hash(hash) => {
+                // Verify against argon2 hash
+                let Ok(parsed_hash) = PasswordHash::new(hash) else {
+                    return false;
+                };
+                Argon2::default()
+                    .verify_password(password, &parsed_hash)
+                    .is_ok()
+            }
         }
     }
 
@@ -131,7 +164,7 @@ impl Hooks for AuthProvider {
         };
 
         // Verify password
-        if self.verify_password(password, &user.password) {
+        if self.verify_password(password, &user.credential) {
             self.store_client_username(client_id, Some(username));
             Ok(true)
         } else {

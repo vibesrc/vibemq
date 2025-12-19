@@ -11,17 +11,20 @@ fn make_test_auth_provider() -> Arc<AuthProvider> {
         users: vec![
             UserConfig {
                 username: "admin".to_string(),
-                password: "admin_pass".to_string(),
+                password: Some("admin_pass".to_string()),
+                password_hash: None,
                 role: Some("admin".to_string()),
             },
             UserConfig {
                 username: "sensor".to_string(),
-                password: "sensor_pass".to_string(),
+                password: Some("sensor_pass".to_string()),
+                password_hash: None,
                 role: Some("device".to_string()),
             },
             UserConfig {
                 username: "readonly".to_string(),
-                password: "readonly_pass".to_string(),
+                password: Some("readonly_pass".to_string()),
+                password_hash: None,
                 role: Some("reader".to_string()),
             },
         ],
