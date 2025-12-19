@@ -50,6 +50,18 @@ Requires `libunwind-dev` on Linux. Run with `MALLOC_CONF=prof:true` for heap pro
 
 Prometheus metrics exposed at `/metrics` when `[metrics]` is enabled in config. Key metrics include connection counts, message rates by type, subscription counts, QoS inflight messages, and latency histograms.
 
+## $SYS Topics
+
+Standard broker statistics published as retained messages (enabled by default, 10s interval):
+- `$SYS/broker/version` - VibeMQ version
+- `$SYS/broker/uptime` - Seconds since start
+- `$SYS/broker/clients/connected` - Current connected clients
+- `$SYS/broker/clients/total` - Total connections since start
+- `$SYS/broker/subscriptions/count` - Current subscriptions
+- `$SYS/broker/retained messages/count` - Current retained messages
+- `$SYS/broker/bytes/received` - Total bytes received
+- `$SYS/broker/bytes/sent` - Total bytes sent
+
 ## Architecture Overview
 
 VibeMQ is a high-performance MQTT v3.1.1/v5.0 broker built with Tokio for async I/O.
@@ -89,7 +101,7 @@ The broker accepts TOML config files. Key sections:
 - `[server]` - bind address, workers, WebSocket settings
 - `[limits]` - max connections, packet size, inflight messages, queued messages, retry interval
 - `[session]` - keep alive, topic aliases, expiry check interval
-- `[mqtt]` - QoS limits, feature flags (retain, wildcards, shared subs)
+- `[mqtt]` - QoS limits, feature flags (retain, wildcards, shared subs), $SYS topics
 - `[auth]` - enable authentication, user list with `password` (plaintext) or `password_hash` (argon2)
 - `[acl]` - enable ACL, role-based topic patterns with `%c`/`%u` substitution
 - `[metrics]` - enable Prometheus metrics endpoint

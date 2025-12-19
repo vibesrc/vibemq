@@ -41,6 +41,7 @@ RUN cp target/$(cat /rust_target)/release/vibemq /vibemq
 FROM scratch
 
 COPY --from=builder /vibemq /vibemq
+COPY ./vibemq.toml /etc/vibemq/config.toml
 
 EXPOSE 1883 9001
 ENTRYPOINT ["/vibemq"]

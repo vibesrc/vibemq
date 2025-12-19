@@ -310,6 +310,12 @@ pub struct MqttConfig {
     /// Whether shared subscriptions are available
     #[serde(default = "default_true")]
     pub shared_subscriptions: bool,
+    /// Whether $SYS topics are published
+    #[serde(default = "default_true")]
+    pub sys_topics: bool,
+    /// $SYS topic publish interval in seconds
+    #[serde(default = "default_sys_interval")]
+    pub sys_interval: u64,
 }
 
 fn default_max_qos() -> u8 {
@@ -317,6 +323,9 @@ fn default_max_qos() -> u8 {
 }
 fn default_true() -> bool {
     true
+}
+fn default_sys_interval() -> u64 {
+    10
 }
 
 impl Default for MqttConfig {
@@ -327,6 +336,8 @@ impl Default for MqttConfig {
             wildcard_subscriptions: true,
             subscription_identifiers: true,
             shared_subscriptions: true,
+            sys_topics: true,
+            sys_interval: default_sys_interval(),
         }
     }
 }
