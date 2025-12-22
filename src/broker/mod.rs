@@ -455,6 +455,7 @@ impl Broker {
             let events = self.events.clone();
             let shutdown = self.shutdown.clone();
             let hooks = self.hooks.clone();
+            let metrics = self.metrics.clone();
 
             tokio::spawn(async move {
                 loop {
@@ -468,6 +469,7 @@ impl Broker {
                             let config = config.clone();
                             let events = events.clone();
                             let hooks = hooks.clone();
+                            let metrics = metrics.clone();
                             let mut shutdown_rx = shutdown.subscribe();
 
                             tokio::spawn(async move {
@@ -485,6 +487,7 @@ impl Broker {
                                             config,
                                             events,
                                             hooks,
+                                            metrics,
                                         );
 
                                         let conn_fut = conn.run();
@@ -550,6 +553,7 @@ impl Broker {
             let events = self.events.clone();
             let shutdown = self.shutdown.clone();
             let hooks = self.hooks.clone();
+            let metrics = self.metrics.clone();
 
             tokio::spawn(async move {
                 loop {
@@ -563,6 +567,7 @@ impl Broker {
                             let config = config.clone();
                             let events = events.clone();
                             let hooks = hooks.clone();
+                            let metrics = metrics.clone();
                             let tls_acceptor = tls_acceptor.clone();
                             let mut shutdown_rx = shutdown.subscribe();
 
@@ -581,6 +586,7 @@ impl Broker {
                                             config,
                                             events,
                                             hooks,
+                                            metrics,
                                         );
 
                                         let conn_fut = conn.run();
@@ -854,6 +860,7 @@ impl Broker {
         let config = self.config.clone();
         let events = self.events.clone();
         let hooks = self.hooks.clone();
+        let metrics = self.metrics.clone();
         let mut shutdown_rx = self.shutdown.subscribe();
 
         tokio::spawn(async move {
@@ -867,6 +874,7 @@ impl Broker {
                 config,
                 events,
                 hooks,
+                metrics,
             );
 
             // Pin the connection future so we can poll it repeatedly

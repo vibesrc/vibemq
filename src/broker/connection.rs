@@ -23,6 +23,7 @@ use tokio::time::timeout;
 use tracing::{debug, error, trace, warn};
 
 use crate::broker::{BrokerConfig, BrokerEvent, RetainedMessage};
+use crate::metrics::Metrics;
 use crate::codec::{Decoder, Encoder};
 use crate::hooks::Hooks;
 use crate::protocol::{
@@ -95,6 +96,7 @@ pub struct Connection<S> {
     packet_tx: mpsc::Sender<Packet>,
     packet_rx: mpsc::Receiver<Packet>,
     hooks: Arc<dyn Hooks>,
+    metrics: Option<Arc<Metrics>>,
     /// Username from CONNECT packet (for ACL checks)
     username: Option<String>,
 }
@@ -114,6 +116,7 @@ where
         config: BrokerConfig,
         events: broadcast::Sender<BrokerEvent>,
         hooks: Arc<dyn Hooks>,
+        metrics: Option<Arc<Metrics>>,
     ) -> Self {
         let (packet_tx, packet_rx) = mpsc::channel(1024);
 
@@ -134,6 +137,7 @@ where
             packet_tx,
             packet_rx,
             hooks,
+            metrics,
             username: None,
         }
     }
@@ -480,7 +484,11 @@ where
                     continue;
                 }
 
+                let bytes_sent = self.write_buf.len();
                 self.stream.write_all(&self.write_buf).await?;
+                if let Some(ref metrics) = self.metrics {
+                    metrics.publish_sent(bytes_sent);
+                }
             }
         }
 
@@ -634,7 +642,11 @@ where
                                 continue;
                             }
 
+                            let bytes_sent = self.write_buf.len();
                             self.stream.write_all(&self.write_buf).await?;
+                            if let Some(ref metrics) = self.metrics {
+                                metrics.publish_sent(bytes_sent);
+                            }
                         }
                         _ => {
                             self.write_buf.clear();
@@ -1349,7 +1361,11 @@ where
             self.encoder
                 .encode(&Packet::Publish(publish), &mut self.write_buf)
                 .map_err(|e| ConnectionError::Protocol(e.into()))?;
+            let bytes_sent = self.write_buf.len();
             self.stream.write_all(&self.write_buf).await?;
+            if let Some(ref metrics) = self.metrics {
+                metrics.publish_sent(bytes_sent);
+            }
         }
 
         Ok(())
