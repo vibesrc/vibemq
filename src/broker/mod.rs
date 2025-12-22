@@ -21,7 +21,7 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::bridge::BridgeManager;
 use crate::cluster::ClusterManager;
@@ -196,7 +196,7 @@ impl Broker {
     /// Create a new broker with custom hooks
     pub fn with_hooks(config: BrokerConfig, hooks: Arc<dyn Hooks>) -> Self {
         let (shutdown, _) = broadcast::channel(1);
-        let (events, _) = broadcast::channel(1024);
+        let (events, _) = broadcast::channel(16384);
 
         Self {
             config,
@@ -677,7 +677,7 @@ impl Broker {
                                 }
                                 Ok(_) => {} // Ignore other events
                                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                                    warn!("Bridge event listener lagged, missed {} events", n);
+                                    debug!("Bridge event listener lagged, missed {} events", n);
                                 }
                                 Err(broadcast::error::RecvError::Closed) => break,
                             }
@@ -739,7 +739,7 @@ impl Broker {
                                 }
                                 Ok(_) => {} // Ignore other events
                                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                                    warn!("Cluster event listener lagged, missed {} events", n);
+                                    debug!("Cluster event listener lagged, missed {} events", n);
                                 }
                                 Err(broadcast::error::RecvError::Closed) => break,
                             }
@@ -800,7 +800,7 @@ impl Broker {
                                     metrics.subscription_removed();
                                 }
                                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                                    warn!("Metrics event listener lagged, missed {} events", n);
+                                    debug!("Metrics event listener lagged, missed {} events", n);
                                 }
                                 Err(broadcast::error::RecvError::Closed) => break,
                             }
