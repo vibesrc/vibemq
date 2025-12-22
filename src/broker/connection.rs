@@ -568,7 +568,7 @@ where
                             }
                         }
                         Err(e) => {
-                            error!("Read error: {}", e);
+                            debug!("Read error: {}", e);
                             self.handle_disconnect(&client_id, &session, true).await;
                             return Err(e.into());
                         }
