@@ -29,7 +29,7 @@ use crate::protocol::{
     ConnAck, Connect, Disconnect, Packet, Properties, ProtocolVersion, PubAck, PubComp, PubRec,
     PubRel, Publish, QoS, ReasonCode, RetainHandling, SubAck, Subscribe, UnsubAck, Unsubscribe,
 };
-use crate::session::{InflightMessage, Qos2State, Session, SessionStore, WillMessage};
+use crate::session::{InflightMessage, Qos2State, QueueResult, Session, SessionStore, WillMessage};
 use crate::topic::{validate_topic_filter, validate_topic_name, Subscription, SubscriptionStore};
 
 /// Connection error types
@@ -439,7 +439,9 @@ where
                     let mut s = session.write();
                     if !s.decrement_send_quota() {
                         // Quota exhausted - re-queue remaining messages
-                        s.queue_message(publish);
+                        if s.queue_message(publish) == QueueResult::DroppedOldest {
+                            let _ = self.events.send(BrokerEvent::MessageDropped);
+                        }
                         continue;
                     }
                     publish.packet_id = Some(s.next_packet_id());
@@ -592,7 +594,9 @@ where
                                         "Send quota exhausted for {}, queuing message",
                                         s.client_id
                                     );
-                                    s.queue_message(publish);
+                                    if s.queue_message(publish) == QueueResult::DroppedOldest {
+                                        let _ = self.events.send(BrokerEvent::MessageDropped);
+                                    }
                                     continue;
                                 }
                                 // Assign packet ID
@@ -674,7 +678,7 @@ where
             Packet::Publish(publish) => self.handle_publish(client_id, session, publish).await,
             Packet::PubAck(puback) => self.handle_puback(session, puback).await,
             Packet::PubRec(pubrec) => self.handle_pubrec(session, pubrec).await,
-            Packet::PubRel(pubrel) => self.handle_pubrel(session, pubrel).await,
+            Packet::PubRel(pubrel) => self.handle_pubrel(client_id, session, pubrel).await,
             Packet::PubComp(pubcomp) => self.handle_pubcomp(session, pubcomp).await,
             Packet::Subscribe(subscribe) => {
                 self.handle_subscribe(client_id, session, subscribe).await
@@ -867,12 +871,11 @@ where
                 self.stream.write_all(&self.write_buf).await?;
             }
             QoS::ExactlyOnce => {
-                // Send PUBREC and store state
+                // Store message and send PUBREC - message will be routed on PUBREL
                 let packet_id = publish.packet_id.unwrap();
                 {
                     let mut s = session.write();
-                    s.inflight_incoming
-                        .insert(packet_id, Qos2State::WaitingPubRec);
+                    s.inflight_incoming.insert(packet_id, publish.clone());
                 }
 
                 let pubrec = PubRec::new(packet_id);
@@ -881,6 +884,26 @@ where
                     .encode(&Packet::PubRec(pubrec), &mut self.write_buf)
                     .map_err(|e| ConnectionError::Protocol(e.into()))?;
                 self.stream.write_all(&self.write_buf).await?;
+
+                // For QoS 2, we route after PUBREL (not now)
+                // Handle retained message now, but don't route to subscribers yet
+                if publish.retain && self.config.retain_available {
+                    if publish.payload.is_empty() {
+                        self.retained.remove(&publish.topic);
+                    } else {
+                        self.retained.insert(
+                            publish.topic.clone(),
+                            RetainedMessage {
+                                topic: publish.topic.clone(),
+                                payload: publish.payload.clone(),
+                                qos: publish.qos,
+                                properties: publish.properties.clone(),
+                                timestamp: Instant::now(),
+                            },
+                        );
+                    }
+                }
+                return Ok(());
             }
         }
 
@@ -965,10 +988,8 @@ where
             let mut outgoing = publish.clone();
             outgoing.qos = effective_qos;
             outgoing.dup = false;
-            // QoS 0 packets must not have a packet identifier
-            if effective_qos == QoS::AtMostOnce {
-                outgoing.packet_id = None;
-            }
+            // Clear incoming packet_id - broker assigns fresh IDs for each subscriber
+            outgoing.packet_id = None;
 
             // Clear retain flag unless retain_as_published
             if !sub_info.retain_as_published {
@@ -986,8 +1007,10 @@ where
                 // Client disconnected, queue message if persistent session
                 if let Some(session) = self.sessions.get(client_id.as_ref()) {
                     let mut s = session.write();
-                    if !s.clean_start {
-                        s.queue_message(outgoing);
+                    if !s.clean_start
+                        && s.queue_message(outgoing) == QueueResult::DroppedOldest
+                    {
+                        let _ = self.events.send(BrokerEvent::MessageDropped);
                     }
                 }
             }
@@ -1043,13 +1066,15 @@ where
     /// Handle PUBREL packet
     async fn handle_pubrel(
         &mut self,
+        client_id: &Arc<str>,
         session: &Arc<RwLock<Session>>,
         pubrel: PubRel,
     ) -> Result<(), ConnectionError> {
-        {
+        // Get the stored message
+        let publish = {
             let mut s = session.write();
-            s.inflight_incoming.remove(&pubrel.packet_id);
-        }
+            s.inflight_incoming.remove(&pubrel.packet_id)
+        };
 
         // Send PUBCOMP
         let pubcomp = PubComp::new(pubrel.packet_id);
@@ -1058,6 +1083,11 @@ where
             .encode(&Packet::PubComp(pubcomp), &mut self.write_buf)
             .map_err(|e| ConnectionError::Protocol(e.into()))?;
         self.stream.write_all(&self.write_buf).await?;
+
+        // Now route the message to subscribers (QoS 2 delivery complete)
+        if let Some(publish) = publish {
+            self.route_message(client_id, &publish).await?;
+        }
 
         Ok(())
     }
@@ -1642,10 +1672,8 @@ async fn route_will_message(
         let mut outgoing = publish.clone();
         outgoing.qos = effective_qos;
         outgoing.dup = false;
-        // QoS 0 packets must not have a packet identifier
-        if effective_qos == QoS::AtMostOnce {
-            outgoing.packet_id = None;
-        }
+        // Clear incoming packet_id - broker assigns fresh IDs for each subscriber
+        outgoing.packet_id = None;
 
         // Clear retain flag unless retain_as_published
         if !sub_info.retain_as_published {
@@ -1663,8 +1691,10 @@ async fn route_will_message(
             // Client disconnected, queue message if persistent session
             if let Some(session) = sessions.get(client_id.as_ref()) {
                 let mut s = session.write();
-                if !s.clean_start {
-                    s.queue_message(outgoing);
+                if !s.clean_start
+                    && s.queue_message(outgoing) == QueueResult::DroppedOldest
+                {
+                    let _ = events.send(BrokerEvent::MessageDropped);
                 }
             }
         }
