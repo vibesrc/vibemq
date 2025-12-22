@@ -23,9 +23,14 @@ pub fn publish_sys_topics(broker: &Broker, metrics: Option<&Metrics>, start_time
     publish(broker, "$SYS/broker/version", VERSION);
     publish(broker, "$SYS/broker/uptime", &uptime.to_string());
 
+    // Session store stats (always available)
+    let disconnected_count = broker.sessions.count_disconnected();
+    let messages_stored = broker.sessions.total_queued_messages();
+    let shared_subs_count = broker.subscriptions.shared_subscription_count();
+
     // Metrics-dependent stats
     if let Some(metrics) = metrics {
-        // Client metrics
+        // Client metrics - existing
         publish(
             broker,
             "$SYS/broker/clients/connected",
@@ -37,21 +42,53 @@ pub fn publish_sys_topics(broker: &Broker, metrics: Option<&Metrics>, start_time
             &metrics.connections_total.get().to_string(),
         );
 
+        // Client metrics - new
+        publish(
+            broker,
+            "$SYS/broker/clients/active",
+            &metrics.connections_current.get().to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/clients/inactive",
+            &disconnected_count.to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/clients/disconnected",
+            &disconnected_count.to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/clients/expired",
+            &metrics.sessions_expired_total.get().to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/clients/maximum",
+            &metrics.connections_maximum.get().to_string(),
+        );
+
         // Subscription metrics
         publish(
             broker,
             "$SYS/broker/subscriptions/count",
             &metrics.subscriptions_current.get().to_string(),
         );
+        publish(
+            broker,
+            "$SYS/broker/shared_subscriptions/count",
+            &shared_subs_count.to_string(),
+        );
 
-        // Retained messages
+        // Retained messages - existing
         publish(
             broker,
             "$SYS/broker/retained messages/count",
             &metrics.retained_messages_current.get().to_string(),
         );
 
-        // Byte metrics
+        // Byte metrics - existing (general)
         publish(
             broker,
             "$SYS/broker/bytes/received",
@@ -61,6 +98,62 @@ pub fn publish_sys_topics(broker: &Broker, metrics: Option<&Metrics>, start_time
             broker,
             "$SYS/broker/bytes/sent",
             &metrics.messages_bytes_sent.get().to_string(),
+        );
+
+        // Message metrics - new (total packets)
+        publish(
+            broker,
+            "$SYS/broker/messages/received",
+            &metrics.messages_total_received.get().to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/messages/sent",
+            &metrics.messages_total_sent.get().to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/messages/stored",
+            &messages_stored.to_string(),
+        );
+
+        // Publish metrics - new
+        publish(
+            broker,
+            "$SYS/broker/publish/bytes/received",
+            &metrics.messages_bytes_received.get().to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/publish/bytes/sent",
+            &metrics.messages_bytes_sent.get().to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/publish/messages/received",
+            &metrics.publish_messages_received.get().to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/publish/messages/sent",
+            &metrics.publish_messages_sent.get().to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/publish/messages/dropped",
+            &metrics.publish_messages_dropped.get().to_string(),
+        );
+
+        // Store metrics - new
+        publish(
+            broker,
+            "$SYS/broker/store/messages/count",
+            &metrics.retained_messages_current.get().to_string(),
+        );
+        publish(
+            broker,
+            "$SYS/broker/store/messages/bytes",
+            &metrics.retained_bytes_current.get().to_string(),
         );
     }
 }
