@@ -23,9 +23,9 @@ use tokio::time::timeout;
 use tracing::{debug, error, trace, warn};
 
 use crate::broker::{BrokerConfig, BrokerEvent, RetainedMessage};
-use crate::metrics::Metrics;
 use crate::codec::{Decoder, Encoder};
 use crate::hooks::Hooks;
+use crate::metrics::Metrics;
 use crate::protocol::{
     ConnAck, Connect, Disconnect, Packet, Properties, ProtocolVersion, PubAck, PubComp, PubRec,
     PubRel, Publish, QoS, ReasonCode, RetainHandling, SubAck, Subscribe, UnsubAck, Unsubscribe,
@@ -1019,9 +1019,7 @@ where
                 // Client disconnected, queue message if persistent session
                 if let Some(session) = self.sessions.get(client_id.as_ref()) {
                     let mut s = session.write();
-                    if !s.clean_start
-                        && s.queue_message(outgoing) == QueueResult::DroppedOldest
-                    {
+                    if !s.clean_start && s.queue_message(outgoing) == QueueResult::DroppedOldest {
                         let _ = self.events.send(BrokerEvent::MessageDropped);
                     }
                 }
@@ -1707,9 +1705,7 @@ async fn route_will_message(
             // Client disconnected, queue message if persistent session
             if let Some(session) = sessions.get(client_id.as_ref()) {
                 let mut s = session.write();
-                if !s.clean_start
-                    && s.queue_message(outgoing) == QueueResult::DroppedOldest
-                {
+                if !s.clean_start && s.queue_message(outgoing) == QueueResult::DroppedOldest {
                     let _ = events.send(BrokerEvent::MessageDropped);
                 }
             }
