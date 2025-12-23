@@ -137,9 +137,7 @@ async fn test_mqtt_4_7_3_1_no_wildcards_in_topic_name() {
     let _ = client.recv_raw(1000).await;
 
     // PUBLISH with + wildcard in topic name
-    let invalid_publish = [
-        0x30, 0x08, 0x00, 0x06, b't', b'e', b's', b't', b'/', b'+',
-    ];
+    let invalid_publish = [0x30, 0x08, 0x00, 0x06, b't', b'e', b's', b't', b'/', b'+'];
     client.send_raw(&invalid_publish).await;
 
     // Server MUST close connection [MQTT-4.7.3-1]

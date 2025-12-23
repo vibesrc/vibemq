@@ -127,7 +127,10 @@ impl RawClient {
 
         let mut packet = vec![0x10, remaining_len as u8];
         packet.extend_from_slice(&[0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, flags, 0x00, 0x3C]);
-        packet.extend_from_slice(&[(client_id_bytes.len() >> 8) as u8, client_id_bytes.len() as u8]);
+        packet.extend_from_slice(&[
+            (client_id_bytes.len() >> 8) as u8,
+            client_id_bytes.len() as u8,
+        ]);
         packet.extend_from_slice(client_id_bytes);
 
         self.send_raw(&packet).await;

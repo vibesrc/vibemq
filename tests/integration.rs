@@ -950,11 +950,14 @@ async fn test_max_inflight_limit() {
 
     // Disconnect and reconnect to get queued messages
     drop(subscriber);
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     let mut subscriber2 = TestClient::connect(addr, ProtocolVersion::V5).await;
     let connack = subscriber2.mqtt_connect("sub-inflight", false).await; // Resume session
     assert!(connack.session_present, "Session should be present");
+
+    // Give broker time to send queued messages
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Should receive remaining queued messages (msg2 and msg3 were queued)
     let msg2 = subscriber2.recv().await;

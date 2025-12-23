@@ -227,8 +227,8 @@ async fn test_mqtt_3_1_2_24_keep_alive_timeout() {
 
     // CONNECT with keep_alive = 1 second
     let connect = [
-        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02,
-        0x00, 0x01, // Keep alive = 1 second
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00,
+        0x01, // Keep alive = 1 second
         0x00, 0x01, b'k',
     ];
     client.send_raw(&connect).await;
@@ -258,8 +258,7 @@ async fn test_mqtt_3_1_3_8_empty_client_id_clean_session_zero() {
 
     // CONNECT with empty client ID and CleanSession=0
     let connect = [
-        0x10, 0x0C, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
-        0x00, // CleanSession=0
+        0x10, 0x0C, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x00, // CleanSession=0
         0x00, 0x3C, 0x00, 0x00, // Empty client ID
     ];
     client.send_raw(&connect).await;

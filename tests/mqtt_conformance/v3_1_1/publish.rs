@@ -248,8 +248,7 @@ async fn test_mqtt_3_3_1_10_empty_retained_clears() {
     // Topic = "clr10" (5 chars), payload = "hello" (5 chars)
     // Remaining = 2 + 5 + 5 = 12 = 0x0C
     let publish = [
-        0x31, 0x0C,
-        0x00, 0x05, b'c', b'l', b'r', b'1', b'0', // Topic "clr10"
+        0x31, 0x0C, 0x00, 0x05, b'c', b'l', b'r', b'1', b'0', // Topic "clr10"
         b'h', b'e', b'l', b'l', b'o',
     ];
     client.send_raw(&publish).await;
@@ -260,8 +259,7 @@ async fn test_mqtt_3_3_1_10_empty_retained_clears() {
     // Topic = "clr10" (5 chars), empty payload
     // Remaining = 2 + 5 = 7 = 0x07
     let clear = [
-        0x31, 0x07,
-        0x00, 0x05, b'c', b'l', b'r', b'1', b'0', // Same topic, empty payload
+        0x31, 0x07, 0x00, 0x05, b'c', b'l', b'r', b'1', b'0', // Same topic, empty payload
     ];
     client.send_raw(&clear).await;
 
@@ -306,9 +304,7 @@ async fn test_mqtt_3_3_2_2_wildcard_in_topic_closes() {
     let _ = client.recv_raw(1000).await;
 
     // PUBLISH with wildcard in topic (INVALID)
-    let invalid_publish = [
-        0x30, 0x08, 0x00, 0x06, b't', b'e', b's', b't', b'/', b'#',
-    ];
+    let invalid_publish = [0x30, 0x08, 0x00, 0x06, b't', b'e', b's', b't', b'/', b'#'];
     client.send_raw(&invalid_publish).await;
 
     // Server MUST close connection [MQTT-3.3.2-2]

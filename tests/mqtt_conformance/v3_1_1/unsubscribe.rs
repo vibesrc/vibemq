@@ -119,7 +119,9 @@ async fn test_mqtt_3_10_4_2_unsuback_no_match() {
     let _ = client.recv_raw(1000).await;
 
     // Unsubscribe from topic never subscribed
-    let unsubscribe = [0xA2, 0x0A, 0x00, 0x01, 0x00, 0x06, b'n', b'o', b's', b'u', b'c', b'h'];
+    let unsubscribe = [
+        0xA2, 0x0A, 0x00, 0x01, 0x00, 0x06, b'n', b'o', b's', b'u', b'c', b'h',
+    ];
     client.send_raw(&unsubscribe).await;
 
     // Server MUST still respond with UNSUBACK [MQTT-3.10.4-2]

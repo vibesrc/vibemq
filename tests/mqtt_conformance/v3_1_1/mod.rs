@@ -6,8 +6,8 @@
 //! Normative reference format: [MQTT-X.Y.Z-N]
 //! where X.Y.Z is the section number and N is the statement number.
 
-pub mod connect;
 pub mod connack;
+pub mod connect;
 pub mod data_representation;
 pub mod disconnect;
 pub mod packet_identifier;

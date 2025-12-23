@@ -20,8 +20,7 @@ async fn test_mqtt_3_1_2_4_session_persistence() {
     // Connect with CleanSession=0, subscribe, disconnect
     let mut client1 = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
     let connect = [
-        0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
-        0x00, // CleanSession=0
+        0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x00, // CleanSession=0
         0x00, 0x3C, 0x00, 0x04, b'p', b'e', b'r', b's',
     ];
     client1.send_raw(&connect).await;
@@ -50,8 +49,8 @@ async fn test_mqtt_3_1_2_4_session_persistence() {
     // Topic = "persist" (7 chars), packet_id (2 bytes), payload = "msg" (3 chars)
     // Remaining = 2 + 7 + 2 + 3 = 14 = 0x0E
     let publish = [
-        0x32, 0x0E,
-        0x00, 0x07, b'p', b'e', b'r', b's', b'i', b's', b't', 0x00, 0x01, b'm', b's', b'g',
+        0x32, 0x0E, 0x00, 0x07, b'p', b'e', b'r', b's', b'i', b's', b't', 0x00, 0x01, b'm', b's',
+        b'g',
     ];
     publisher.send_raw(&publish).await;
     let _ = publisher.recv_raw(1000).await;
@@ -93,8 +92,7 @@ async fn test_mqtt_3_1_2_6_clean_session_discards() {
     // Connect with CleanSession=0, subscribe
     let mut client1 = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
     let connect_persistent = [
-        0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
-        0x00, // CleanSession=0
+        0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x00, // CleanSession=0
         0x00, 0x3C, 0x00, 0x04, b'd', b'i', b's', b'c',
     ];
     client1.send_raw(&connect_persistent).await;
@@ -114,8 +112,7 @@ async fn test_mqtt_3_1_2_6_clean_session_discards() {
     // Reconnect with CleanSession=1 [MQTT-3.1.2-6]
     let mut client2 = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
     let connect_clean = [
-        0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
-        0x02, // CleanSession=1
+        0x10, 0x10, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, // CleanSession=1
         0x00, 0x3C, 0x00, 0x04, b'd', b'i', b's', b'c',
     ];
     client2.send_raw(&connect_clean).await;

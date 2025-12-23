@@ -310,12 +310,7 @@ where
             outgoing.qos = effective_qos;
             outgoing.dup = false;
             // Clear incoming packet_id - broker assigns fresh IDs for each subscriber
-            // Also clear for QoS 0 to avoid frame corruption
-            if effective_qos == QoS::AtMostOnce {
-                outgoing.packet_id = None;
-            } else {
-                outgoing.packet_id = None;
-            }
+            outgoing.packet_id = None;
 
             // Clear retain flag unless retain_as_published
             if !sub_info.retain_as_published {

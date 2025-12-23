@@ -88,8 +88,7 @@ async fn test_mqtt_3_8_4_3_subscription_replacement() {
     // Topic = "replace" (7 chars), payload = "hi" (2 chars)
     // Remaining = 2 + 7 + 2 = 11 = 0x0B
     let publish = [
-        0x31, 0x0B,
-        0x00, 0x07, b'r', b'e', b'p', b'l', b'a', b'c', b'e', // Topic
+        0x31, 0x0B, 0x00, 0x07, b'r', b'e', b'p', b'l', b'a', b'c', b'e', // Topic
         b'h', b'i',
     ];
     client.send_raw(&publish).await;

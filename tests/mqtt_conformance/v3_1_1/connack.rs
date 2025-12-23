@@ -21,8 +21,7 @@ async fn test_mqtt_3_2_2_1_clean_session_present_zero() {
 
     // Connect with CleanSession=1
     let connect = [
-        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
-        0x02, // CleanSession=1
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, // CleanSession=1
         0x00, 0x3C, 0x00, 0x01, b'c',
     ];
     client.send_raw(&connect).await;
@@ -54,15 +53,16 @@ async fn test_mqtt_3_2_2_2_stored_session_present_one() {
     // First connection with CleanSession=0
     let mut client1 = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
     let connect = [
-        0x10, 0x0E, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
-        0x00, // CleanSession=0
+        0x10, 0x0E, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x00, // CleanSession=0
         0x00, 0x3C, 0x00, 0x02, b's', b'p',
     ];
     client1.send_raw(&connect).await;
     let _ = client1.recv_raw(1000).await;
 
     // Subscribe to create session state
-    let subscribe = [0x82, 0x09, 0x00, 0x01, 0x00, 0x04, b't', b'e', b's', b't', 0x00];
+    let subscribe = [
+        0x82, 0x09, 0x00, 0x01, 0x00, 0x04, b't', b'e', b's', b't', 0x00,
+    ];
     client1.send_raw(&subscribe).await;
     let _ = client1.recv_raw(1000).await;
 
@@ -104,8 +104,7 @@ async fn test_mqtt_3_2_2_3_no_session_present_zero() {
 
     // Connect with CleanSession=0 but no prior session
     let connect = [
-        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
-        0x00, // CleanSession=0
+        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x00, // CleanSession=0
         0x00, 0x3C, 0x00, 0x03, b'n', b'e', b'w',
     ];
     client.send_raw(&connect).await;

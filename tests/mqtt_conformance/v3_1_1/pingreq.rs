@@ -4,7 +4,9 @@
 
 use std::net::SocketAddr;
 
-use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient, CONNECT_V311, PINGREQ};
+use crate::mqtt_conformance::{
+    next_port, start_broker, test_config, RawClient, CONNECT_V311, PINGREQ,
+};
 
 // ============================================================================
 // [MQTT-3.12.4-1] Server MUST Send PINGRESP in Response to PINGREQ
@@ -25,7 +27,10 @@ async fn test_mqtt_3_12_4_1_pingresp_response() {
 
     // Server MUST respond with PINGRESP [MQTT-3.12.4-1]
     if let Some(data) = client.recv_raw(1000).await {
-        assert_eq!(data[0], 0xD0, "Server MUST respond with PINGRESP [MQTT-3.12.4-1]");
+        assert_eq!(
+            data[0], 0xD0,
+            "Server MUST respond with PINGRESP [MQTT-3.12.4-1]"
+        );
         assert_eq!(data[1], 0x00, "PINGRESP remaining length must be 0");
     } else {
         panic!("Server MUST send PINGRESP in response to PINGREQ [MQTT-3.12.4-1]");
