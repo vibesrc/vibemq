@@ -74,7 +74,7 @@ VibeMQ is a high-performance MQTT v3.1.1/v5.0 broker built with Tokio for async 
 - **`hooks/`** - Extensibility via `Hooks` trait for auth, ACL, and event handling. `CompositeHooks` chains multiple implementations.
 - **`auth/`** - `AuthProvider` implements `Hooks` for username/password authentication. Supports plaintext passwords (`password`) or argon2 hashes (`password_hash`).
 - **`acl/`** - `AclProvider` implements `Hooks` for topic-based publish/subscribe authorization. Supports `%c` (client_id) and `%u` (username) substitution in topic patterns.
-- **`config/`** - TOML configuration with env var substitution (`${VAR:-default}`) and `VIBEMQ_*` prefix overrides.
+- **`config/`** - TOML configuration with env var substitution (`${VAR:-default}`) and `VIBEMQ__*` prefix overrides (double underscore for nesting).
 - **`transport/`** - WebSocket support via `WsStream` wrapper around tokio-tungstenite.
 - **`bridge/`** - MQTT bridging to external brokers. `BridgeClient` implements `RemotePeer` trait to connect as an MQTT client. `TopicMapper` handles topic pattern matching and remapping. `BridgeManager` coordinates multiple bridges.
 - **`cluster/`** - Gossip-based clustering via Chitchat protocol. Nodes discover each other via UDP gossip and forward messages via TCP with bincode serialization.
@@ -110,7 +110,7 @@ The broker accepts TOML config files. Key sections:
 ### Environment Variables
 
 - Config values support `${VAR}` and `${VAR:-default}` substitution
-- `VIBEMQ_*` prefixed env vars override config (e.g., `VIBEMQ_SERVER_BIND`, `VIBEMQ_AUTH_ENABLED`)
+- `VIBEMQ__*` prefixed env vars override config (e.g., `VIBEMQ__SERVER__BIND`, `VIBEMQ__AUTH__ENABLED`)
 
 ### TLS Configuration Example
 

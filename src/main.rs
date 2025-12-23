@@ -284,6 +284,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  Workers: {}", broker_config.num_workers);
     info!("  Max connections: {}", broker_config.max_connections);
     info!("  Max packet size: {} bytes", broker_config.max_packet_size);
+    info!("  Max inflight: {}", broker_config.max_inflight);
+    info!("  Max queued messages: {}", broker_config.max_queued_messages);
+    info!("  Outbound channel capacity: {}", broker_config.outbound_channel_capacity);
     info!("  Max QoS: {:?}", broker_config.max_qos);
 
     // Log auth/ACL status

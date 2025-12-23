@@ -445,10 +445,10 @@ impl Config {
     ///
     /// Supports two forms of environment variable usage:
     /// 1. In-file substitution: `${VAR}` or `${VAR:-default}` syntax in the TOML file
-    /// 2. Override via env vars: `VIBEMQ_` prefix with underscores for nesting:
-    ///    - `VIBEMQ_SERVER_BIND=0.0.0.0:1884` overrides `server.bind`
-    ///    - `VIBEMQ_LIMITS_MAX_CONNECTIONS=50000` overrides `limits.max_connections`
-    ///    - `VIBEMQ_AUTH_ENABLED=true` overrides `auth.enabled`
+    /// 2. Override via env vars: `VIBEMQ__` prefix with double underscores for nesting:
+    ///    - `VIBEMQ__SERVER__BIND=0.0.0.0:1884` overrides `server.bind`
+    ///    - `VIBEMQ__LIMITS__MAX_CONNECTIONS=50000` overrides `limits.max_connections`
+    ///    - `VIBEMQ__AUTH__ENABLED=true` overrides `auth.enabled`
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let mut builder = config::Config::builder()
             // Start with defaults
@@ -489,11 +489,12 @@ impl Config {
             Err(e) => return Err(ConfigError::Io(e)),
         }
 
-        // Override with environment variables (VIBEMQ_SERVER_BIND, etc.)
+        // Override with environment variables (VIBEMQ__SERVER__BIND, etc.)
+        // Double underscore separates nested keys, single underscore preserved in field names
         let cfg = builder
             .add_source(
                 Environment::with_prefix("VIBEMQ")
-                    .separator("_")
+                    .separator("__")
                     .try_parsing(true),
             )
             .build()?;

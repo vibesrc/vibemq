@@ -6,12 +6,12 @@ services:
       - 1883:1883
     environment:
       # yolo mode: 0 = unbounded for all limits
-      - VIBEMQ_LIMITS_MAX_CONNECTIONS=0
-      - VIBEMQ_LIMITS_MAX_INFLIGHT=0
-      - VIBEMQ_LIMITS_MAX_QUEUED_MESSAGES=0
-      - VIBEMQ_LIMITS_MAX_AWAITING_REL=0
-      - VIBEMQ_LIMITS_OUTBOUND_CHANNEL_CAPACITY=0
-      - VIBEMQ_LIMITS_RETRY_INTERVAL=30
+      - VIBEMQ__LIMITS__MAX_CONNECTIONS=0
+      - VIBEMQ__LIMITS__MAX_INFLIGHT=0
+      - VIBEMQ__LIMITS__MAX_QUEUED_MESSAGES=0
+      - VIBEMQ__LIMITS__MAX_AWAITING_REL=0
+      - VIBEMQ__LIMITS__OUTBOUND_CHANNEL_CAPACITY=0
+      - VIBEMQ__LIMITS__RETRY_INTERVAL=30
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "1883"]
       interval: 5s

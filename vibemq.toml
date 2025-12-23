@@ -7,11 +7,11 @@
 #    bind = "${MQTT_HOST:-0.0.0.0}:${MQTT_PORT:-1883}"
 #    password = "${ADMIN_PASSWORD}"
 #
-# 2. Override any field with VIBEMQ_ prefixed env vars:
-#    VIBEMQ_SERVER_BIND=0.0.0.0:1884
-#    VIBEMQ_LIMITS_MAX_CONNECTIONS=50000
-#    VIBEMQ_AUTH_ENABLED=true
-#    VIBEMQ_MQTT_MAX_QOS=1
+# 2. Override any field with VIBEMQ__ prefixed env vars (double underscore):
+#    VIBEMQ__SERVER__BIND=0.0.0.0:1884
+#    VIBEMQ__LIMITS__MAX_CONNECTIONS=50000
+#    VIBEMQ__AUTH__ENABLED=true
+#    VIBEMQ__MQTT__MAX_QOS=1
 
 [log]
 # Log level: error, warn, info, debug, trace

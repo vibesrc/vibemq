@@ -214,12 +214,12 @@ qos = 1
 
 ### Environment Variable Overrides
 
-Override any config value with `VIBEMQ_` prefixed environment variables:
+Override any config value with `VIBEMQ__` prefixed environment variables (double underscore separates nested keys):
 
 ```bash
-VIBEMQ_SERVER_BIND=0.0.0.0:1884 cargo run
-VIBEMQ_AUTH_ENABLED=true cargo run
-VIBEMQ_LIMITS_MAX_CONNECTIONS=50000 cargo run
+VIBEMQ__SERVER__BIND=0.0.0.0:1884 cargo run
+VIBEMQ__AUTH__ENABLED=true cargo run
+VIBEMQ__LIMITS__MAX_CONNECTIONS=50000 cargo run
 ```
 
 Use `${VAR:-default}` syntax in config files for env var substitution:
