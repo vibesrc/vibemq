@@ -209,6 +209,12 @@ where
                                             // Normal disconnect, already handled in handle_packet
                                             return Err(e);
                                         }
+                                        ConnectionError::Io(_) => {
+                                            // IO errors (broken pipe, etc.) are normal during disconnect
+                                            debug!("Connection error: {}", e);
+                                            self.handle_disconnect(&client_id, &session, true).await;
+                                            return Err(e);
+                                        }
                                         _ => {
                                             error!("Error handling packet: {}", e);
                                             self.handle_disconnect(&client_id, &session, true).await;
