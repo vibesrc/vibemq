@@ -54,6 +54,7 @@ fn test_config(port: u16) -> BrokerConfig {
         max_queued_messages: 1000,
         max_awaiting_rel: 100,
         retry_interval: Duration::from_secs(30),
+        outbound_channel_capacity: 1024,
     }
 }
 
