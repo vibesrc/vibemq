@@ -87,7 +87,7 @@ impl RawClient {
     }
 
     async fn expect_disconnect(&mut self, timeout_ms: u64) -> bool {
-        let mut buf = vec![0u8; 1];
+        let mut buf = vec![0u8; 64];
         match timeout(
             Duration::from_millis(timeout_ms),
             self.stream.read(&mut buf),
@@ -96,6 +96,15 @@ impl RawClient {
         {
             Ok(Ok(0)) => true,  // Connection closed
             Ok(Err(_)) => true, // Error (connection reset)
+            Ok(Ok(n)) => {
+                // Check if we received a DISCONNECT packet (0xE0)
+                // This counts as being disconnected by the broker
+                if n >= 2 && buf[0] == 0xE0 {
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         }
     }
@@ -926,6 +935,559 @@ async fn test_null_character_in_topic_closes_connection() {
     assert!(
         client.expect_disconnect(1000).await,
         "Server should close connection on null in topic"
+    );
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-3.1.2-24: Keep Alive Timeout (1.5x)
+// ============================================================================
+
+#[tokio::test]
+async fn test_keep_alive_timeout_disconnects_client() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+
+    // CONNECT with keep_alive = 1 second (shortest practical value)
+    let connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02,
+        0x00, 0x01, // Keep alive = 1 second
+        0x00, 0x01, b'a',
+    ];
+    client.send_raw(&connect).await;
+    let _ = client.recv_raw(1000).await; // CONNACK
+
+    // Don't send any packets - wait for 1.5x keep_alive = 1.5 seconds
+    // Server MUST disconnect after 1.5x keep_alive (MQTT-3.1.2-24)
+    assert!(
+        client.expect_disconnect(3000).await,
+        "Server should disconnect after 1.5x keep-alive timeout"
+    );
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-3.1.4-2: Session Takeover Disconnects Existing Client
+// ============================================================================
+
+#[tokio::test]
+async fn test_session_takeover_disconnects_existing_client() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // First client connects
+    let mut client1 = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let connect = [
+        0x10, 0x0E, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C,
+        0x00, 0x02, b'c', b'1', // Client ID "c1"
+    ];
+    client1.send_raw(&connect).await;
+    let _ = client1.recv_raw(1000).await; // CONNACK
+
+    // Small delay to ensure first connection is fully registered
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Second client connects with same client ID
+    let mut client2 = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    client2.send_raw(&connect).await;
+    let _ = client2.recv_raw(1000).await; // CONNACK for client2
+
+    // First client should be disconnected (MQTT-3.1.4-2)
+    // May receive DISCONNECT first (v5.0) then connection closed
+    // Give more time for async takeover to complete
+    assert!(
+        client1.expect_disconnect(2000).await,
+        "First client should be disconnected on session takeover"
+    );
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-3.14.4-3: Will Message Deleted on Normal Disconnect
+// ============================================================================
+
+#[tokio::test]
+async fn test_will_message_not_published_on_normal_disconnect() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Subscriber connects first
+    let mut subscriber = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let sub_connect = [
+        0x10, 0x0E, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C,
+        0x00, 0x03, b's', b'u', b'b',
+    ];
+    subscriber.send_raw(&sub_connect).await;
+    let _ = subscriber.recv_raw(1000).await;
+
+    // Subscribe to will topic
+    let subscribe = [
+        0x82, 0x0A, 0x00, 0x01,
+        0x00, 0x05, b'w', b'i', b'l', b'l', b's',
+        0x00, // QoS 0
+    ];
+    subscriber.send_raw(&subscribe).await;
+    let _ = subscriber.recv_raw(1000).await; // SUBACK
+
+    // Publisher connects with will message
+    let mut publisher = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let pub_connect = [
+        0x10, 0x1D,
+        0x00, 0x04, b'M', b'Q', b'T', b'T',
+        0x04,
+        0x06, // Clean session + will flag
+        0x00, 0x3C,
+        0x00, 0x03, b'p', b'u', b'b', // Client ID
+        0x00, 0x05, b'w', b'i', b'l', b'l', b's', // Will topic
+        0x00, 0x04, b't', b'e', b's', b't', // Will message
+    ];
+    publisher.send_raw(&pub_connect).await;
+    let _ = publisher.recv_raw(1000).await;
+
+    // Send normal DISCONNECT
+    let disconnect = [0xE0, 0x00];
+    publisher.send_raw(&disconnect).await;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Subscriber should NOT receive will message (MQTT-3.14.4-3)
+    let received = subscriber.recv_raw(500).await;
+    assert!(
+        received.is_none(),
+        "Will message should not be published on normal disconnect"
+    );
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-3.1.2-8: Will Message Published on Abnormal Disconnect
+// ============================================================================
+
+#[tokio::test]
+async fn test_will_message_published_on_abnormal_disconnect() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Subscriber connects first
+    // Remaining length = 6 (proto name) + 1 (version) + 1 (flags) + 2 (keepalive) + 5 (client id) = 15 = 0x0F
+    let mut subscriber = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let sub_connect = [
+        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C,
+        0x00, 0x03, b's', b'u', b'b',
+    ];
+    subscriber.send_raw(&sub_connect).await;
+    let _ = subscriber.recv_raw(1000).await;
+
+    // Subscribe to will topic
+    // Remaining length = 2 (packet id) + 2 (len) + 6 (topic) + 1 (qos) = 11 = 0x0B
+    let subscribe = [
+        0x82, 0x0B, 0x00, 0x01,
+        0x00, 0x06, b'w', b'i', b'l', b'l', b's', b'2',
+        0x00,
+    ];
+    subscriber.send_raw(&subscribe).await;
+    let _ = subscriber.recv_raw(1000).await;
+
+    // Publisher connects with will message using short keep-alive
+    // to ensure quick detection of abnormal disconnect
+    // Remaining length = 6 (protocol name) + 1 (version) + 1 (flags) + 2 (keep alive)
+    //                  + 6 (client id) + 8 (will topic) + 6 (will payload) = 30 = 0x1E
+    let pub_connect = [
+        0x10, 0x1E,
+        0x00, 0x04, b'M', b'Q', b'T', b'T',
+        0x04,
+        0x06, // Clean session + will flag
+        0x00, 0x01, // Keep alive = 1 second (for faster disconnect detection)
+        0x00, 0x04, b'p', b'u', b'b', b'2', // Client ID (4 chars)
+        0x00, 0x06, b'w', b'i', b'l', b'l', b's', b'2', // Will topic (6 chars)
+        0x00, 0x04, b'w', b'i', b'l', b'l', // Will message payload (4 chars)
+    ];
+    let publisher = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let mut pub_stream = publisher.stream;
+    pub_stream.write_all(&pub_connect).await.unwrap();
+
+    let mut buf = [0u8; 64];
+    let read_result = timeout(Duration::from_millis(500), pub_stream.read(&mut buf)).await;
+
+    // Verify we got a CONNACK (connection was accepted)
+    match read_result {
+        Ok(Ok(n)) if n >= 2 => {
+            assert_eq!(buf[0], 0x20, "Should receive CONNACK");
+        }
+        _ => panic!("Should receive CONNACK from broker"),
+    }
+
+    // Small delay to ensure connection is fully established
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Close connection abruptly without DISCONNECT (abnormal disconnect)
+    // Use shutdown to ensure immediate TCP close
+    let _ = pub_stream.shutdown().await;
+    drop(pub_stream);
+
+    // Subscriber should receive will message (MQTT-3.1.2-8)
+    // Give broker time to detect disconnect and publish will
+    if let Some(data) = subscriber.recv_raw(3000).await {
+        assert_eq!(data[0] & 0xF0, 0x30, "Should receive PUBLISH");
+        // Verify it's the will message on the will topic
+    } else {
+        panic!("Will message should be published on abnormal disconnect");
+    }
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-4.3.2-4: PUBACK Must Contain Same Packet ID as PUBLISH
+// ============================================================================
+
+#[tokio::test]
+async fn test_qos1_puback_has_matching_packet_id() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+
+    // Connect
+    let connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x01, b'a',
+    ];
+    client.send_raw(&connect).await;
+    let _ = client.recv_raw(1000).await;
+
+    // Publish QoS 1 with packet ID = 0x1234
+    let publish = [
+        0x32, 0x0A, // PUBLISH QoS 1
+        0x00, 0x04, b't', b'e', b's', b't', // Topic
+        0x12, 0x34, // Packet ID
+        b'h', b'i', // Payload
+    ];
+    client.send_raw(&publish).await;
+
+    // PUBACK must have same packet ID (MQTT-4.3.2-4)
+    if let Some(data) = client.recv_raw(1000).await {
+        assert_eq!(data[0], 0x40, "Should receive PUBACK");
+        assert_eq!(data[2], 0x12, "Packet ID MSB should match");
+        assert_eq!(data[3], 0x34, "Packet ID LSB should match");
+    } else {
+        panic!("Should receive PUBACK");
+    }
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-4.3.3-8: PUBREC Must Contain Same Packet ID as PUBLISH
+// ============================================================================
+
+#[tokio::test]
+async fn test_qos2_pubrec_has_matching_packet_id() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+
+    // Connect
+    let connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x01, b'a',
+    ];
+    client.send_raw(&connect).await;
+    let _ = client.recv_raw(1000).await;
+
+    // Publish QoS 2 with packet ID = 0xABCD
+    let publish = [
+        0x34, 0x0A, // PUBLISH QoS 2
+        0x00, 0x04, b't', b'e', b's', b't', // Topic
+        0xAB, 0xCD, // Packet ID
+        b'h', b'i', // Payload
+    ];
+    client.send_raw(&publish).await;
+
+    // PUBREC must have same packet ID (MQTT-4.3.3-8)
+    if let Some(data) = client.recv_raw(1000).await {
+        assert_eq!(data[0], 0x50, "Should receive PUBREC");
+        assert_eq!(data[2], 0xAB, "Packet ID MSB should match");
+        assert_eq!(data[3], 0xCD, "Packet ID LSB should match");
+    } else {
+        panic!("Should receive PUBREC");
+    }
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-4.3.3-11: PUBCOMP Must Contain Same Packet ID as PUBREL
+// ============================================================================
+
+#[tokio::test]
+async fn test_qos2_pubcomp_has_matching_packet_id() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+
+    // Connect
+    let connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x01, b'a',
+    ];
+    client.send_raw(&connect).await;
+    let _ = client.recv_raw(1000).await;
+
+    // Publish QoS 2
+    let publish = [
+        0x34, 0x0A, // PUBLISH QoS 2
+        0x00, 0x04, b't', b'e', b's', b't',
+        0x00, 0x05, // Packet ID = 5
+        b'h', b'i',
+    ];
+    client.send_raw(&publish).await;
+    let _ = client.recv_raw(1000).await; // PUBREC
+
+    // Send PUBREL with packet ID = 5
+    let pubrel = [0x62, 0x02, 0x00, 0x05];
+    client.send_raw(&pubrel).await;
+
+    // PUBCOMP must have same packet ID (MQTT-4.3.3-11)
+    if let Some(data) = client.recv_raw(1000).await {
+        assert_eq!(data[0], 0x70, "Should receive PUBCOMP");
+        assert_eq!(data[2], 0x00, "Packet ID MSB should match");
+        assert_eq!(data[3], 0x05, "Packet ID LSB should match");
+    } else {
+        panic!("Should receive PUBCOMP");
+    }
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-3.8.4-2: SUBACK Must Have Same Packet ID as SUBSCRIBE
+// ============================================================================
+
+#[tokio::test]
+async fn test_suback_has_matching_packet_id() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+
+    // Connect
+    let connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x01, b'a',
+    ];
+    client.send_raw(&connect).await;
+    let _ = client.recv_raw(1000).await;
+
+    // Subscribe with packet ID = 0xBEEF
+    let subscribe = [
+        0x82, 0x09,
+        0xBE, 0xEF, // Packet ID
+        0x00, 0x04, b't', b'e', b's', b't',
+        0x00,
+    ];
+    client.send_raw(&subscribe).await;
+
+    // SUBACK must have same packet ID (MQTT-3.8.4-2)
+    if let Some(data) = client.recv_raw(1000).await {
+        assert_eq!(data[0], 0x90, "Should receive SUBACK");
+        assert_eq!(data[2], 0xBE, "Packet ID MSB should match");
+        assert_eq!(data[3], 0xEF, "Packet ID LSB should match");
+    } else {
+        panic!("Should receive SUBACK");
+    }
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-3.3.1-5: Retained Message Storage
+// ============================================================================
+
+#[tokio::test]
+async fn test_retained_message_delivered_to_new_subscriber() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Publisher sends retained message
+    let mut publisher = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x01, b'p',
+    ];
+    publisher.send_raw(&connect).await;
+    let _ = publisher.recv_raw(1000).await;
+
+    // PUBLISH with retain flag
+    let publish = [
+        0x31, 0x0C, // PUBLISH QoS 0, retain=1
+        0x00, 0x06, b'r', b'e', b't', b'a', b'i', b'n', // Topic
+        b'h', b'e', b'l', b'l', b'o', // Payload
+    ];
+    publisher.send_raw(&publish).await;
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // New subscriber connects and subscribes
+    let mut subscriber = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let sub_connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x01, b's',
+    ];
+    subscriber.send_raw(&sub_connect).await;
+    let _ = subscriber.recv_raw(1000).await;
+
+    let subscribe = [
+        0x82, 0x0B, 0x00, 0x01,
+        0x00, 0x06, b'r', b'e', b't', b'a', b'i', b'n',
+        0x00,
+    ];
+    subscriber.send_raw(&subscribe).await;
+
+    // Should receive SUBACK then retained message (MQTT-3.3.1-5)
+    let _ = subscriber.recv_raw(500).await; // SUBACK
+
+    if let Some(data) = subscriber.recv_raw(1000).await {
+        assert_eq!(data[0] & 0xF0, 0x30, "Should receive PUBLISH");
+        assert_eq!(data[0] & 0x01, 0x01, "Retain flag should be set");
+    } else {
+        panic!("Should receive retained message");
+    }
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// MQTT-3.3.1-6: Empty Retained Message Removes Existing
+// ============================================================================
+
+#[tokio::test]
+async fn test_empty_retained_message_removes_existing() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker = Broker::new(config);
+
+    let broker_handle = tokio::spawn(async move {
+        let _ = broker.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x01, b'c',
+    ];
+    client.send_raw(&connect).await;
+    let _ = client.recv_raw(1000).await;
+
+    // Use unique topic name for this test to avoid interference
+    // First, publish a retained message
+    // Remaining length = 2 (topic len) + 7 (topic) + 5 (payload) = 14 = 0x0E
+    let publish = [
+        0x31, 0x0E,
+        0x00, 0x07, b'c', b'l', b'e', b'a', b'r', b'/', b'x', // Topic "clear/x"
+        b'h', b'e', b'l', b'l', b'o',
+    ];
+    client.send_raw(&publish).await;
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Now send empty retained message to clear it (MQTT-3.3.1-6)
+    // Empty payload with retain=1 should remove the retained message
+    let clear = [
+        0x31, 0x09,
+        0x00, 0x07, b'c', b'l', b'e', b'a', b'r', b'/', b'x', // Same topic, empty payload
+    ];
+    client.send_raw(&clear).await;
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // New subscriber should not receive any retained message
+    let mut subscriber = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let sub_connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x01, b's',
+    ];
+    subscriber.send_raw(&sub_connect).await;
+    let _ = subscriber.recv_raw(1000).await;
+
+    let subscribe = [
+        0x82, 0x0C, 0x00, 0x01,
+        0x00, 0x07, b'c', b'l', b'e', b'a', b'r', b'/', b'x',
+        0x00,
+    ];
+    subscriber.send_raw(&subscribe).await;
+    let _ = subscriber.recv_raw(500).await; // SUBACK
+
+    // Should NOT receive any retained message
+    let received = subscriber.recv_raw(500).await;
+    assert!(
+        received.is_none(),
+        "Should not receive retained message after it was cleared"
     );
 
     broker_handle.abort();
