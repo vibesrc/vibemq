@@ -91,7 +91,7 @@ VibeMQ is a high-performance MQTT v3.1.1/v5.0 broker built with Tokio for async 
 
 ### MQTT Spec Reference
 
-The `spec/` directory contains markdown files documenting MQTT v3.1.1 and v5.0 packet formats and behaviors, organized by section number (e.g., `spec/v3.1.1/3.3_publish.md`).
+The `docs/mqtt-rfc/` directory contains comprehensive MQTT v3.1.1 and v5.0 specification documentation in RFC style, organized by section number (e.g., `docs/mqtt-rfc/v3.1.1/05.03-publish.md`). Each version includes an `appendix-a-normative.md` with all normative statements for conformance testing.
 
 ## Configuration
 
