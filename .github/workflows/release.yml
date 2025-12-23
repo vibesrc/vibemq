@@ -40,6 +40,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set version from tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "Setting version to $VERSION"
+          sed -i "s/^version = .*/version = \"$VERSION\"/" Cargo.toml
+        shell: bash
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}

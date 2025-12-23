@@ -1,6 +1,6 @@
 [package]
 name = "vibemq"
-version = "0.4.0"
+version = "0.0.0-dev"
 edition = "2021"
 authors = ["VibeMQ Contributors"]
 description = "High-performance MQTT v3.1.1/v5.0 compliant broker"
