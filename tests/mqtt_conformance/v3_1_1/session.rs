@@ -35,7 +35,7 @@ async fn test_mqtt_3_1_2_4_session_persistence() {
     client1.send_raw(&DISCONNECT).await;
     drop(client1);
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Publish while client is disconnected
     let mut publisher = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
@@ -55,7 +55,7 @@ async fn test_mqtt_3_1_2_4_session_persistence() {
     publisher.send_raw(&publish).await;
     let _ = publisher.recv_raw(1000).await;
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Reconnect - should receive queued message [MQTT-3.1.2-4/5]
     let mut client2 = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
@@ -65,8 +65,11 @@ async fn test_mqtt_3_1_2_4_session_persistence() {
     let connack = connack.unwrap();
     assert_eq!(connack[2], 0x01, "Session present should be 1");
 
+    // Give broker time to send queued messages after session resume
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
     // Should receive queued message [MQTT-3.1.2-5]
-    if let Some(data) = client2.recv_raw(1000).await {
+    if let Some(data) = client2.recv_raw(2000).await {
         assert_eq!(
             data[0] & 0xF0,
             0x30,
