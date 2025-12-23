@@ -286,18 +286,19 @@ impl Session {
 
         pending
             .into_iter()
-            .filter_map(|mut pm| {
+            .filter_map(|pm| {
                 // Check if message has expired
-                if let Some(expiry) = pm.publish.properties.message_expiry_interval {
+                if let Some(expiry) = pm.publish.message_expiry_interval() {
                     let elapsed = now.duration_since(pm.queued_at).as_secs() as u32;
                     if elapsed >= expiry {
                         // Message expired - drop it per MQTT-3.3.2-5
                         return None;
                     }
                     // Update expiry to reflect remaining time
-                    pm.publish.properties.message_expiry_interval = Some(expiry - elapsed);
+                    Some(pm.publish.with_updated_message_expiry(Some(expiry - elapsed)))
+                } else {
+                    Some(pm.publish)
                 }
-                Some(pm.publish)
             })
             .collect()
     }
@@ -307,7 +308,7 @@ impl Session {
     pub fn cleanup_expired_messages(&mut self) {
         let now = Instant::now();
         self.pending_messages.retain(|pm| {
-            if let Some(expiry) = pm.publish.properties.message_expiry_interval {
+            if let Some(expiry) = pm.publish.message_expiry_interval() {
                 let elapsed = now.duration_since(pm.queued_at).as_secs() as u32;
                 elapsed < expiry
             } else {
@@ -564,39 +565,35 @@ mod tests {
             Session::new("test".into(), ProtocolVersion::V5, SessionLimits::default());
 
         // Create a message with 1 second expiry
-        let mut publish1 = Publish {
-            topic: "test/topic".to_string(),
-            payload: bytes::Bytes::from("test1"),
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            dup: false,
-            packet_id: None,
-            properties: Properties::default(),
-        };
-        publish1.properties.message_expiry_interval = Some(1); // 1 second
+        let mut props1 = Properties::default();
+        props1.message_expiry_interval = Some(1); // 1 second
+        let publish1 = Publish::with_properties(
+            "test/topic",
+            bytes::Bytes::from("test1"),
+            QoS::AtLeastOnce,
+            false,
+            props1,
+        );
 
         // Create a message with no expiry
-        let publish2 = Publish {
-            topic: "test/topic".to_string(),
-            payload: bytes::Bytes::from("test2"),
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            dup: false,
-            packet_id: None,
-            properties: Properties::default(),
-        };
+        let publish2 = Publish::with_properties(
+            "test/topic",
+            bytes::Bytes::from("test2"),
+            QoS::AtLeastOnce,
+            false,
+            Properties::default(),
+        );
 
         // Create a message with long expiry
-        let mut publish3 = Publish {
-            topic: "test/topic".to_string(),
-            payload: bytes::Bytes::from("test3"),
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            dup: false,
-            packet_id: None,
-            properties: Properties::default(),
-        };
-        publish3.properties.message_expiry_interval = Some(3600); // 1 hour
+        let mut props3 = Properties::default();
+        props3.message_expiry_interval = Some(3600); // 1 hour
+        let publish3 = Publish::with_properties(
+            "test/topic",
+            bytes::Bytes::from("test3"),
+            QoS::AtLeastOnce,
+            false,
+            props3,
+        );
 
         session.queue_message(publish1);
         session.queue_message(publish2);
@@ -616,7 +613,7 @@ mod tests {
         // Check that the remaining messages are correct
         let payloads: Vec<_> = messages
             .iter()
-            .map(|p| String::from_utf8_lossy(&p.payload).to_string())
+            .map(|p| String::from_utf8_lossy(p.payload()).to_string())
             .collect();
         assert!(payloads.contains(&"test2".to_string()));
         assert!(payloads.contains(&"test3".to_string()));
@@ -629,16 +626,15 @@ mod tests {
         let mut session =
             Session::new("test".into(), ProtocolVersion::V5, SessionLimits::default());
 
-        let mut publish = Publish {
-            topic: "test/topic".to_string(),
-            payload: bytes::Bytes::from("test"),
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            dup: false,
-            packet_id: None,
-            properties: Properties::default(),
-        };
-        publish.properties.message_expiry_interval = Some(10); // 10 seconds
+        let mut props = Properties::default();
+        props.message_expiry_interval = Some(10); // 10 seconds
+        let publish = Publish::with_properties(
+            "test/topic",
+            bytes::Bytes::from("test"),
+            QoS::AtLeastOnce,
+            false,
+            props,
+        );
 
         session.queue_message(publish);
 
@@ -649,7 +645,7 @@ mod tests {
         assert_eq!(messages.len(), 1);
 
         // Expiry should be decremented (10 - 2 = 8, give or take)
-        let remaining = messages[0].properties.message_expiry_interval.unwrap();
+        let remaining = messages[0].message_expiry_interval().unwrap();
         assert!(
             remaining <= 8,
             "Expiry should be decremented: {}",
@@ -668,26 +664,23 @@ mod tests {
         let mut session =
             Session::new("test".into(), ProtocolVersion::V5, SessionLimits::default());
 
-        let mut publish1 = Publish {
-            topic: "test/topic".to_string(),
-            payload: bytes::Bytes::from("expires"),
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            dup: false,
-            packet_id: None,
-            properties: Properties::default(),
-        };
-        publish1.properties.message_expiry_interval = Some(1);
+        let mut props1 = Properties::default();
+        props1.message_expiry_interval = Some(1);
+        let publish1 = Publish::with_properties(
+            "test/topic",
+            bytes::Bytes::from("expires"),
+            QoS::AtLeastOnce,
+            false,
+            props1,
+        );
 
-        let publish2 = Publish {
-            topic: "test/topic".to_string(),
-            payload: bytes::Bytes::from("no_expiry"),
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            dup: false,
-            packet_id: None,
-            properties: Properties::default(),
-        };
+        let publish2 = Publish::with_properties(
+            "test/topic",
+            bytes::Bytes::from("no_expiry"),
+            QoS::AtLeastOnce,
+            false,
+            Properties::default(),
+        );
 
         session.queue_message(publish1);
         session.queue_message(publish2);
@@ -702,7 +695,7 @@ mod tests {
 
         assert_eq!(session.pending_messages.len(), 1);
         assert_eq!(
-            String::from_utf8_lossy(&session.pending_messages[0].publish.payload),
+            String::from_utf8_lossy(session.pending_messages[0].publish.payload()),
             "no_expiry"
         );
     }

@@ -152,16 +152,15 @@ impl TestClient {
         } else {
             None
         };
-        let publish = Packet::Publish(Publish {
-            dup: false,
+        let mut publish = Publish::with_properties(
+            topic,
+            Bytes::copy_from_slice(payload),
             qos,
             retain,
-            topic: topic.to_string(),
-            packet_id,
-            payload: Bytes::copy_from_slice(payload),
-            properties: Properties::default(),
-        });
-        self.send(&publish).await;
+            Properties::default(),
+        );
+        publish.packet_id = packet_id;
+        self.send(&Packet::Publish(publish)).await;
         packet_id
     }
 }
@@ -304,8 +303,8 @@ async fn test_publish_qos0_flow() {
     // Subscriber should receive the message
     tokio::time::sleep(Duration::from_millis(100)).await;
     if let Some(Packet::Publish(pub_msg)) = subscriber.recv().await {
-        assert_eq!(pub_msg.topic, "test/topic");
-        assert_eq!(&pub_msg.payload[..], b"hello");
+        assert_eq!(pub_msg.topic(), "test/topic");
+        assert_eq!(&pub_msg.payload()[..], b"hello");
     }
 
     broker_handle.abort();
@@ -329,16 +328,15 @@ async fn test_publish_qos1_flow() {
     publisher.mqtt_connect("qos1-publisher", true).await;
 
     // Publish QoS 1 message
-    let publish = Packet::Publish(Publish {
-        dup: false,
-        qos: QoS::AtLeastOnce,
-        retain: false,
-        topic: "qos1/test".to_string(),
-        packet_id: Some(100),
-        payload: Bytes::from_static(b"qos1 message"),
-        properties: Properties::default(),
-    });
-    publisher.send(&publish).await;
+    let mut publish = Publish::with_properties(
+        "qos1/test",
+        Bytes::from_static(b"qos1 message"),
+        QoS::AtLeastOnce,
+        false,
+        Properties::default(),
+    );
+    publish.packet_id = Some(100);
+    publisher.send(&Packet::Publish(publish)).await;
 
     // Should receive PUBACK
     match publisher.recv().await {
@@ -368,16 +366,15 @@ async fn test_publish_qos2_flow() {
     publisher.mqtt_connect("qos2-publisher", true).await;
 
     // Publish QoS 2 message
-    let publish = Packet::Publish(Publish {
-        dup: false,
-        qos: QoS::ExactlyOnce,
-        retain: false,
-        topic: "qos2/test".to_string(),
-        packet_id: Some(200),
-        payload: Bytes::from_static(b"qos2 message"),
-        properties: Properties::default(),
-    });
-    publisher.send(&publish).await;
+    let mut publish = Publish::with_properties(
+        "qos2/test",
+        Bytes::from_static(b"qos2 message"),
+        QoS::ExactlyOnce,
+        false,
+        Properties::default(),
+    );
+    publish.packet_id = Some(200);
+    publisher.send(&Packet::Publish(publish)).await;
 
     // Should receive PUBREC
     match publisher.recv().await {
@@ -444,7 +441,7 @@ async fn test_wildcard_single_level() {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     if let Some(Packet::Publish(msg)) = subscriber.recv().await {
-        assert_eq!(msg.topic, "sensors/kitchen/temperature");
+        assert_eq!(msg.topic(), "sensors/kitchen/temperature");
     }
 
     broker_handle.abort();
@@ -482,7 +479,7 @@ async fn test_wildcard_multi_level() {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     if let Some(Packet::Publish(msg)) = subscriber.recv().await {
-        assert_eq!(msg.topic, "home/floor1/room2/sensor/temp");
+        assert_eq!(msg.topic(), "home/floor1/room2/sensor/temp");
     }
 
     broker_handle.abort();
@@ -523,8 +520,8 @@ async fn test_retained_message() {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     if let Some(Packet::Publish(msg)) = subscriber.recv().await {
-        assert_eq!(msg.topic, "status/device");
-        assert_eq!(&msg.payload[..], b"online");
+        assert_eq!(msg.topic(), "status/device");
+        assert_eq!(&msg.payload()[..], b"online");
         assert!(msg.retain);
     }
 
@@ -583,8 +580,8 @@ async fn test_will_message_on_disconnect() {
 
     // Subscriber should receive the will message
     if let Some(Packet::Publish(msg)) = subscriber.recv().await {
-        assert_eq!(msg.topic, "client/status");
-        assert_eq!(&msg.payload[..], b"offline");
+        assert_eq!(msg.topic(), "client/status");
+        assert_eq!(&msg.payload()[..], b"offline");
     }
 
     broker_handle.abort();
@@ -778,10 +775,10 @@ async fn test_multiple_subscribers() {
 
     // Both subscribers should receive the message
     if let Some(Packet::Publish(msg1)) = sub1.recv().await {
-        assert_eq!(&msg1.payload[..], b"to all");
+        assert_eq!(&msg1.payload()[..], b"to all");
     }
     if let Some(Packet::Publish(msg2)) = sub2.recv().await {
-        assert_eq!(&msg2.payload[..], b"to all");
+        assert_eq!(&msg2.payload()[..], b"to all");
     }
 
     broker_handle.abort();
@@ -847,16 +844,15 @@ async fn test_max_awaiting_rel_limit() {
     // Send QoS 2 publishes without completing the handshake (no PUBREL)
     // First two should succeed
     for i in 1..=2 {
-        let publish = Packet::Publish(Publish {
-            dup: false,
-            qos: QoS::ExactlyOnce,
-            retain: false,
-            topic: "test/qos2".to_string(),
-            packet_id: Some(i),
-            payload: Bytes::from(format!("msg{}", i)),
-            properties: Properties::default(),
-        });
-        client.send(&publish).await;
+        let mut publish = Publish::with_properties(
+            "test/qos2",
+            Bytes::from(format!("msg{}", i)),
+            QoS::ExactlyOnce,
+            false,
+            Properties::default(),
+        );
+        publish.packet_id = Some(i);
+        client.send(&Packet::Publish(publish)).await;
 
         // Should receive PUBREC with Success
         if let Some(Packet::PubRec(pubrec)) = client.recv().await {
@@ -870,16 +866,15 @@ async fn test_max_awaiting_rel_limit() {
     }
 
     // Third QoS 2 publish should be rejected with QuotaExceeded
-    let publish3 = Packet::Publish(Publish {
-        dup: false,
-        qos: QoS::ExactlyOnce,
-        retain: false,
-        topic: "test/qos2".to_string(),
-        packet_id: Some(3),
-        payload: Bytes::from("msg3"),
-        properties: Properties::default(),
-    });
-    client.send(&publish3).await;
+    let mut publish3 = Publish::with_properties(
+        "test/qos2",
+        Bytes::from("msg3"),
+        QoS::ExactlyOnce,
+        false,
+        Properties::default(),
+    );
+    publish3.packet_id = Some(3);
+    client.send(&Packet::Publish(publish3)).await;
 
     if let Some(Packet::PubRec(pubrec)) = client.recv().await {
         assert_eq!(
@@ -918,16 +913,15 @@ async fn test_max_inflight_limit() {
     publisher.mqtt_connect("pub-inflight", true).await;
 
     // Publish a QoS 1 message
-    let publish = Packet::Publish(Publish {
-        dup: false,
-        qos: QoS::AtLeastOnce,
-        retain: false,
-        topic: "test/inflight".to_string(),
-        packet_id: Some(1),
-        payload: Bytes::from("test message"),
-        properties: Properties::default(),
-    });
-    publisher.send(&publish).await;
+    let mut publish = Publish::with_properties(
+        "test/inflight",
+        Bytes::from("test message"),
+        QoS::AtLeastOnce,
+        false,
+        Properties::default(),
+    );
+    publish.packet_id = Some(1);
+    publisher.send(&Packet::Publish(publish)).await;
     let _ = publisher.recv().await; // PUBACK from broker
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -937,7 +931,7 @@ async fn test_max_inflight_limit() {
     assert!(msg.is_some(), "Should receive message");
 
     if let Some(Packet::Publish(p)) = msg {
-        assert_eq!(p.payload.as_ref(), b"test message");
+        assert_eq!(p.payload().as_ref(), b"test message");
         // ACK it
         let puback = Packet::PubAck(vibemq::protocol::PubAck::new(p.packet_id.unwrap()));
         subscriber.send(&puback).await;

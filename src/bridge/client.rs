@@ -299,15 +299,15 @@ impl BridgeClient {
                                 None
                             };
 
-                            let publish = Packet::Publish(Publish {
-                                dup: false,
+                            let mut publish = Publish::with_properties(
+                                topic,
+                                payload,
                                 qos,
                                 retain,
-                                topic,
-                                packet_id,
-                                payload,
-                                properties: Properties::default(),
-                            });
+                                Properties::default(),
+                            );
+                            publish.packet_id = packet_id;
+                            let publish = Packet::Publish(publish);
 
                             buf.clear();
                             if encoder.encode(&publish, &mut buf).is_ok() {
@@ -372,15 +372,15 @@ impl BridgeClient {
                                 // Forward to local broker via callback
                                 if let Some(ref callback) = inbound_callback {
                                     if let Some((local_topic, qos, retain)) = topic_mapper.map_inbound(
-                                        &publish.topic,
+                                        publish.topic(),
                                         publish.qos,
                                         publish.retain,
                                     ) {
                                         debug!(
                                             "Bridge '{}': Forwarding {} -> {}",
-                                            config.name, publish.topic, local_topic
+                                            config.name, publish.topic(), local_topic
                                         );
-                                        callback(local_topic, publish.payload, qos, retain);
+                                        callback(local_topic, publish.payload().clone(), qos, retain);
                                     }
                                 }
 

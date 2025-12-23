@@ -2,13 +2,16 @@
 //!
 //! Decodes MQTT packets for both v3.1.1 and v5.0
 
+use std::sync::Arc;
+
 use bytes::Bytes;
+use smallvec::SmallVec;
 
 use super::{read_binary, read_string, read_variable_int, MAX_REMAINING_LENGTH};
 use crate::protocol::{
     Auth, ConnAck, Connect, DecodeError, Disconnect, Packet, Properties, ProtocolVersion, PubAck,
-    PubComp, PubRec, PubRel, Publish, QoS, ReasonCode, SubAck, Subscribe, Subscription,
-    SubscriptionOptions, UnsubAck, Unsubscribe, Will,
+    PubComp, PubRec, PubRel, Publish, PublishCore, QoS, ReasonCode, SubAck, Subscribe,
+    Subscription, SubscriptionOptions, UnsubAck, Unsubscribe, Will,
 };
 
 /// MQTT Packet Decoder
@@ -334,14 +337,20 @@ impl Decoder {
         // Payload (remainder)
         let message_payload = Bytes::copy_from_slice(&payload[pos..]);
 
+        // Create shared core for zero-copy fan-out
+        let core = Arc::new(PublishCore {
+            topic: Arc::from(topic),
+            payload: message_payload,
+            properties,
+        });
+
         Ok(Packet::Publish(Publish {
+            core,
             dup,
             qos,
             retain,
-            topic: topic.to_string(),
             packet_id,
-            payload: message_payload,
-            properties,
+            subscription_ids: SmallVec::new(),
         }))
     }
 

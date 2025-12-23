@@ -160,16 +160,15 @@ impl TestClient {
         } else {
             None
         };
-        let publish = Packet::Publish(Publish {
-            dup: false,
+        let mut publish = Publish::with_properties(
+            topic,
+            Bytes::copy_from_slice(payload),
             qos,
             retain,
-            topic: topic.to_string(),
-            packet_id,
-            payload: Bytes::copy_from_slice(payload),
-            properties: Properties::default(),
-        });
-        self.send(&publish).await;
+            Properties::default(),
+        );
+        publish.packet_id = packet_id;
+        self.send(&Packet::Publish(publish)).await;
 
         // Wait for PUBACK if QoS 1
         if qos == QoS::AtLeastOnce {

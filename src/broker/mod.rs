@@ -290,15 +290,13 @@ impl Broker {
                 );
 
                 // Create a publish packet
-                let publish = Publish {
-                    dup: false,
+                let publish = Publish::with_properties(
+                    topic.clone(),
+                    payload.clone(),
                     qos,
                     retain,
-                    topic: topic.clone(),
-                    packet_id: None,
-                    payload: payload.clone(),
-                    properties: Properties::default(),
-                };
+                    Properties::default(),
+                );
 
                 // Handle retained message
                 if retain {
@@ -386,15 +384,13 @@ impl Broker {
         let inbound_callback = Arc::new(
             move |topic: String, payload: Bytes, qos: QoS, retain: bool| {
                 // Create a publish packet
-                let publish = Publish {
-                    dup: false,
+                let publish = Publish::with_properties(
+                    topic.clone(),
+                    payload.clone(),
                     qos,
                     retain,
-                    topic: topic.clone(),
-                    packet_id: None,
-                    payload: payload.clone(),
-                    properties: Properties::default(),
-                };
+                    Properties::default(),
+                );
 
                 // Handle retained message
                 if retain {
@@ -935,15 +931,13 @@ impl Broker {
     /// Publish a message from the server
     pub fn publish(&self, topic: String, payload: Bytes, qos: QoS, retain: bool) {
         // Create a publish packet
-        let publish = Publish {
-            dup: false,
+        let publish = Publish::with_properties(
+            topic.clone(),
+            payload.clone(),
             qos,
             retain,
-            topic: topic.clone(),
-            packet_id: None,
-            payload: payload.clone(),
-            properties: Properties::default(),
-        };
+            Properties::default(),
+        );
 
         // Handle retained message
         if retain {

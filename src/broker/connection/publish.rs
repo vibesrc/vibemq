@@ -27,7 +27,7 @@ where
         mut publish: Publish,
     ) -> Result<(), ConnectionError> {
         // Validate topic name
-        if let Err(e) = validate_topic_name(&publish.topic) {
+        if let Err(e) = validate_topic_name(publish.topic()) {
             warn!("Invalid topic name from {}: {}", client_id, e);
             // For v5.0, send PUBACK/PUBREC with error
             if publish.qos != QoS::AtMostOnce {
@@ -55,12 +55,12 @@ where
         }
 
         // Handle topic alias (v5.0)
-        if let Some(alias) = publish.properties.topic_alias {
-            if publish.topic.is_empty() {
+        if let Some(alias) = publish.properties().topic_alias {
+            if publish.topic().is_empty() {
                 // Lookup alias
                 let s = session.read();
                 if let Some(topic) = s.resolve_topic_alias(alias) {
-                    publish.topic = topic.clone();
+                    publish.set_topic(topic.clone().into());
                 } else {
                     // Invalid alias
                     return Err(ConnectionError::Protocol(
@@ -70,14 +70,14 @@ where
             } else {
                 // Register alias
                 let mut s = session.write();
-                s.register_topic_alias(alias, publish.topic.clone());
+                s.register_topic_alias(alias, publish.topic().to_string());
             }
         }
 
         trace!(
             "PUBLISH from {} to {} (QoS {:?})",
             client_id,
-            publish.topic,
+            publish.topic(),
             publish.qos
         );
 
@@ -87,7 +87,7 @@ where
             .on_publish_check(
                 client_id,
                 self.username.as_deref(),
-                &publish.topic,
+                publish.topic(),
                 publish.qos,
                 publish.retain,
             )
@@ -100,7 +100,7 @@ where
             Ok(false) => {
                 debug!(
                     "PUBLISH denied for {} to topic {} (ACL)",
-                    client_id, publish.topic
+                    client_id, publish.topic()
                 );
                 // For QoS > 0, send acknowledgment with error reason code
                 if publish.qos != QoS::AtMostOnce {
@@ -209,16 +209,16 @@ where
                 // For QoS 2, we route after PUBREL (not now)
                 // Handle retained message now, but don't route to subscribers yet
                 if publish.retain && self.config.retain_available {
-                    if publish.payload.is_empty() {
-                        self.retained.remove(&publish.topic);
+                    if publish.payload().is_empty() {
+                        self.retained.remove(publish.topic());
                     } else {
                         self.retained.insert(
-                            publish.topic.clone(),
+                            publish.topic().to_string(),
                             RetainedMessage {
-                                topic: publish.topic.clone(),
-                                payload: publish.payload.clone(),
+                                topic: publish.topic().to_string(),
+                                payload: publish.payload().clone(),
                                 qos: publish.qos,
-                                properties: publish.properties.clone(),
+                                properties: publish.properties().clone(),
                                 timestamp: Instant::now(),
                             },
                         );
@@ -230,16 +230,16 @@ where
 
         // Handle retained message
         if publish.retain && self.config.retain_available {
-            if publish.payload.is_empty() {
-                self.retained.remove(&publish.topic);
+            if publish.payload().is_empty() {
+                self.retained.remove(publish.topic());
             } else {
                 self.retained.insert(
-                    publish.topic.clone(),
+                    publish.topic().to_string(),
                     RetainedMessage {
-                        topic: publish.topic.clone(),
-                        payload: publish.payload.clone(),
+                        topic: publish.topic().to_string(),
+                        payload: publish.payload().clone(),
                         qos: publish.qos,
-                        properties: publish.properties.clone(),
+                        properties: publish.properties().clone(),
                         timestamp: Instant::now(),
                     },
                 );
@@ -259,7 +259,7 @@ where
         sender_id: &Arc<str>,
         publish: &Publish,
     ) -> Result<(), ConnectionError> {
-        let matches = self.subscriptions.matches(&publish.topic);
+        let matches = self.subscriptions.matches(publish.topic());
 
         // Deduplicate by client_id, keeping highest QoS and collecting ALL subscription IDs
         // Uses SmallVec for subscription_ids since most messages match few subscriptions
@@ -317,9 +317,9 @@ where
                 outgoing.retain = false;
             }
 
-            // Add ALL subscription identifiers
+            // Add ALL subscription identifiers (per-subscriber, not in core properties)
             for id in sub_info.subscription_ids {
-                outgoing.properties.subscription_identifiers.push(id);
+                outgoing.subscription_ids.push(id);
             }
 
             if let Some(sender) = self.connections.get(&client_id) {
@@ -341,8 +341,8 @@ where
 
         // Notify event subscribers (for bridge forwarding and monitoring)
         let _ = self.events.send(BrokerEvent::MessagePublished {
-            topic: publish.topic.clone(),
-            payload: publish.payload.clone(),
+            topic: publish.topic().to_string(),
+            payload: publish.payload().clone(),
             qos: publish.qos,
             retain: publish.retain,
         });

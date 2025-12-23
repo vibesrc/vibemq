@@ -234,25 +234,24 @@ where
 
             let effective_qos = retained.qos.min(qos);
 
-            let mut publish = Publish {
-                dup: false,
-                qos: effective_qos,
-                retain: true,
-                topic: retained.topic.clone(),
-                packet_id: None,
-                payload: retained.payload.clone(),
-                properties: retained.properties.clone(),
-            };
-
+            // Clone and update properties for retained message delivery
+            let mut props = retained.properties.clone();
             // Decrement message expiry interval by elapsed time
-            if let Some(expiry) = publish.properties.message_expiry_interval {
-                publish.properties.message_expiry_interval =
-                    Some(expiry.saturating_sub(elapsed_secs));
+            if let Some(expiry) = props.message_expiry_interval {
+                props.message_expiry_interval = Some(expiry.saturating_sub(elapsed_secs));
             }
 
-            // Add subscription identifier
+            let mut publish = Publish::with_properties(
+                retained.topic.clone(),
+                retained.payload.clone(),
+                effective_qos,
+                true, // retain
+                props,
+            );
+
+            // Add subscription identifier (per-subscriber, not in core properties)
             if let Some(sub_id) = subscription_id {
-                publish.properties.subscription_identifiers.push(sub_id);
+                publish.subscription_ids.push(sub_id);
             }
 
             if effective_qos != QoS::AtMostOnce {

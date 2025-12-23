@@ -102,28 +102,26 @@ where
                                     client_id, will.topic
                                 );
 
-                                let publish = Publish {
-                                    dup: false,
-                                    qos: will.qos,
-                                    retain: will.retain,
-                                    topic: will.topic.clone(),
-                                    packet_id: None,
-                                    payload: will.payload,
-                                    properties: will.properties,
-                                };
+                                let publish = Publish::with_properties(
+                                    will.topic.clone(),
+                                    will.payload,
+                                    will.qos,
+                                    will.retain,
+                                    will.properties,
+                                );
 
                                 // Handle retained
                                 if will.retain && config.retain_available {
-                                    if publish.payload.is_empty() {
+                                    if publish.payload().is_empty() {
                                         retained.remove(&will.topic);
                                     } else {
                                         retained.insert(
                                             will.topic.clone(),
                                             RetainedMessage {
                                                 topic: will.topic.clone(),
-                                                payload: publish.payload.clone(),
+                                                payload: publish.payload().clone(),
                                                 qos: publish.qos,
-                                                properties: publish.properties.clone(),
+                                                properties: publish.properties().clone(),
                                                 timestamp: Instant::now(),
                                             },
                                         );
@@ -150,28 +148,26 @@ where
                     });
                 } else {
                     // Publish immediately (no delay)
-                    let publish = Publish {
-                        dup: false,
-                        qos: will.qos,
-                        retain: will.retain,
-                        topic: will.topic.clone(),
-                        packet_id: None,
-                        payload: will.payload,
-                        properties: will.properties,
-                    };
+                    let publish = Publish::with_properties(
+                        will.topic.clone(),
+                        will.payload,
+                        will.qos,
+                        will.retain,
+                        will.properties,
+                    );
 
                     // Handle retained
                     if will.retain && self.config.retain_available {
-                        if publish.payload.is_empty() {
+                        if publish.payload().is_empty() {
                             self.retained.remove(&will.topic);
                         } else {
                             self.retained.insert(
                                 will.topic.clone(),
                                 RetainedMessage {
                                     topic: will.topic.clone(),
-                                    payload: publish.payload.clone(),
+                                    payload: publish.payload().clone(),
                                     qos: publish.qos,
-                                    properties: publish.properties.clone(),
+                                    properties: publish.properties().clone(),
                                     timestamp: Instant::now(),
                                 },
                             );
@@ -213,7 +209,7 @@ pub(crate) async fn route_will_message(
     sender_id: &Arc<str>,
     publish: &Publish,
 ) -> Result<(), ConnectionError> {
-    let matches = subscriptions.matches(&publish.topic);
+    let matches = subscriptions.matches(publish.topic());
 
     // Deduplicate by client_id, keeping highest QoS and collecting ALL subscription IDs
     struct ClientSub {
@@ -269,9 +265,9 @@ pub(crate) async fn route_will_message(
             outgoing.retain = false;
         }
 
-        // Add ALL subscription identifiers
+        // Add ALL subscription identifiers (per-subscriber, not in core properties)
         for id in sub_info.subscription_ids {
-            outgoing.properties.subscription_identifiers.push(id);
+            outgoing.subscription_ids.push(id);
         }
 
         if let Some(sender) = connections.get(&client_id) {
@@ -289,8 +285,8 @@ pub(crate) async fn route_will_message(
 
     // Notify event subscribers (for bridge forwarding and monitoring)
     let _ = events.send(BrokerEvent::MessagePublished {
-        topic: publish.topic.clone(),
-        payload: publish.payload.clone(),
+        topic: publish.topic().to_string(),
+        payload: publish.payload().clone(),
         qos: publish.qos,
         retain: publish.retain,
     });

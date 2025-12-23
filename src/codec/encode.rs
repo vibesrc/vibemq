@@ -201,19 +201,25 @@ impl Encoder {
     fn encode_publish(&self, packet: &Publish, buf: &mut BytesMut) -> Result<(), EncodeError> {
         let is_v5 = self.protocol_version == ProtocolVersion::V5;
 
+        // Access shared core data
+        let topic = packet.topic();
+        let payload = packet.payload();
+        let properties = packet.properties();
+
         // Calculate remaining length
-        let mut remaining_length = 2 + packet.topic.len(); // topic length prefix + topic
+        let mut remaining_length = 2 + topic.len(); // topic length prefix + topic
 
         if packet.qos != QoS::AtMostOnce {
             remaining_length += 2; // packet identifier
         }
 
         if is_v5 {
-            let props_len = packet.properties.encoded_size();
+            // Include extra per-subscriber subscription IDs in size calculation
+            let props_len = properties.encoded_size_with_extra_sub_ids(&packet.subscription_ids);
             remaining_length += variable_int_len(props_len as u32) + props_len;
         }
 
-        remaining_length += packet.payload.len();
+        remaining_length += payload.len();
 
         // Fixed header
         let mut first_byte: u8 = 0x30; // PUBLISH type (0011)
@@ -228,20 +234,20 @@ impl Encoder {
         write_variable_int(buf, remaining_length as u32)?;
 
         // Topic name
-        write_string(buf, &packet.topic)?;
+        write_string(buf, topic)?;
 
         // Packet identifier (only for QoS > 0)
         if let Some(packet_id) = packet.packet_id {
             buf.put_u16(packet_id);
         }
 
-        // Properties (v5.0 only)
+        // Properties (v5.0 only) - include extra subscription IDs
         if is_v5 {
-            packet.properties.encode(buf)?;
+            properties.encode_with_extra_sub_ids(buf, &packet.subscription_ids)?;
         }
 
         // Payload
-        buf.put_slice(&packet.payload);
+        buf.put_slice(payload);
 
         Ok(())
     }

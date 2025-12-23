@@ -331,15 +331,13 @@ fn test_connack_all_v311_reason_codes() {
 
 #[test]
 fn test_publish_qos0() {
-    let packet = Packet::Publish(Publish {
-        dup: false,
-        qos: QoS::AtMostOnce,
-        retain: false,
-        topic: "test/topic".to_string(),
-        packet_id: None,
-        payload: Bytes::from("hello world"),
-        properties: Properties::default(),
-    });
+    let packet = Packet::Publish(Publish::with_properties(
+        "test/topic",
+        Bytes::from("hello world"),
+        QoS::AtMostOnce,
+        false,
+        Properties::default(),
+    ));
 
     let encoded = encode_packet(&packet, ProtocolVersion::V311);
     let decoded = decode_packet(&encoded, Some(ProtocolVersion::V311)).unwrap();
@@ -348,15 +346,15 @@ fn test_publish_qos0() {
 
 #[test]
 fn test_publish_qos1() {
-    let packet = Packet::Publish(Publish {
-        dup: false,
-        qos: QoS::AtLeastOnce,
-        retain: false,
-        topic: "test/topic".to_string(),
-        packet_id: Some(1234),
-        payload: Bytes::from("hello world"),
-        properties: Properties::default(),
-    });
+    let mut publish = Publish::with_properties(
+        "test/topic",
+        Bytes::from("hello world"),
+        QoS::AtLeastOnce,
+        false,
+        Properties::default(),
+    );
+    publish.packet_id = Some(1234);
+    let packet = Packet::Publish(publish);
 
     let encoded = encode_packet(&packet, ProtocolVersion::V311);
     let decoded = decode_packet(&encoded, Some(ProtocolVersion::V311)).unwrap();
@@ -365,15 +363,16 @@ fn test_publish_qos1() {
 
 #[test]
 fn test_publish_qos2() {
-    let packet = Packet::Publish(Publish {
-        dup: true,
-        qos: QoS::ExactlyOnce,
-        retain: true,
-        topic: "sensors/temp".to_string(),
-        packet_id: Some(65535),
-        payload: Bytes::from(r#"{"temp": 25.5}"#),
-        properties: Properties::default(),
-    });
+    let mut publish = Publish::with_properties(
+        "sensors/temp",
+        Bytes::from(r#"{"temp": 25.5}"#),
+        QoS::ExactlyOnce,
+        true,
+        Properties::default(),
+    );
+    publish.dup = true;
+    publish.packet_id = Some(65535);
+    let packet = Packet::Publish(publish);
 
     let encoded = encode_packet(&packet, ProtocolVersion::V311);
     let decoded = decode_packet(&encoded, Some(ProtocolVersion::V311)).unwrap();
@@ -390,15 +389,15 @@ fn test_publish_v5_with_properties() {
     props.correlation_data = Some(Bytes::from("correlation-123"));
     props.content_type = Some("application/json".to_string());
 
-    let packet = Packet::Publish(Publish {
-        dup: false,
-        qos: QoS::AtLeastOnce,
-        retain: false,
-        topic: "data/stream".to_string(),
-        packet_id: Some(100),
-        payload: Bytes::from(r#"{"value": 42}"#),
-        properties: props,
-    });
+    let mut publish = Publish::with_properties(
+        "data/stream",
+        Bytes::from(r#"{"value": 42}"#),
+        QoS::AtLeastOnce,
+        false,
+        props,
+    );
+    publish.packet_id = Some(100);
+    let packet = Packet::Publish(publish);
 
     let encoded = encode_packet(&packet, ProtocolVersion::V5);
     let decoded = decode_packet(&encoded, Some(ProtocolVersion::V5)).unwrap();
@@ -407,15 +406,13 @@ fn test_publish_v5_with_properties() {
 
 #[test]
 fn test_publish_empty_payload() {
-    let packet = Packet::Publish(Publish {
-        dup: false,
-        qos: QoS::AtMostOnce,
-        retain: true,
-        topic: "clear/retained".to_string(),
-        packet_id: None,
-        payload: Bytes::new(), // Empty payload clears retained message
-        properties: Properties::default(),
-    });
+    let packet = Packet::Publish(Publish::with_properties(
+        "clear/retained",
+        Bytes::new(), // Empty payload clears retained message
+        QoS::AtMostOnce,
+        true,
+        Properties::default(),
+    ));
 
     let encoded = encode_packet(&packet, ProtocolVersion::V311);
     let decoded = decode_packet(&encoded, Some(ProtocolVersion::V311)).unwrap();
@@ -1125,15 +1122,11 @@ fn test_roundtrip_all_packet_types_v311() {
             will: None,
             properties: Properties::default(),
         })),
-        Packet::Publish(Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            topic: "test".to_string(),
-            packet_id: Some(1),
-            payload: Bytes::from("data"),
-            properties: Properties::default(),
-        }),
+        {
+            let mut p = Publish::with_properties("test", Bytes::from("data"), QoS::AtLeastOnce, false, Properties::default());
+            p.packet_id = Some(1);
+            Packet::Publish(p)
+        },
         Packet::PubAck(PubAck::new(1)),
         Packet::PubRec(PubRec::new(2)),
         Packet::PubRel(PubRel::new(3)),
@@ -1181,15 +1174,11 @@ fn test_roundtrip_all_packet_types_v5() {
             reason_code: ReasonCode::Success,
             properties: Properties::default(),
         }),
-        Packet::Publish(Publish {
-            dup: false,
-            qos: QoS::ExactlyOnce,
-            retain: true,
-            topic: "test".to_string(),
-            packet_id: Some(1),
-            payload: Bytes::from("data"),
-            properties: Properties::default(),
-        }),
+        {
+            let mut p = Publish::with_properties("test", Bytes::from("data"), QoS::ExactlyOnce, true, Properties::default());
+            p.packet_id = Some(1);
+            Packet::Publish(p)
+        },
         Packet::PubAck(PubAck::new(1)),
         Packet::PubRec(PubRec::new(2)),
         Packet::PubRel(PubRel::new(3)),
@@ -1336,15 +1325,13 @@ mod proptest_tests {
             payload in prop::collection::vec(any::<u8>(), 0..1000),
             retain in any::<bool>(),
         ) {
-            let packet = Packet::Publish(Publish {
-                dup: false,
-                qos: QoS::AtMostOnce,
-                retain,
+            let packet = Packet::Publish(Publish::with_properties(
                 topic,
-                packet_id: None,
-                payload: Bytes::from(payload),
-                properties: Properties::default(),
-            });
+                Bytes::from(payload),
+                QoS::AtMostOnce,
+                retain,
+                Properties::default(),
+            ));
             let encoded = encode_packet(&packet, ProtocolVersion::V311);
             let decoded = decode_packet(&encoded, Some(ProtocolVersion::V311)).unwrap();
             prop_assert_eq!(packet, decoded);
@@ -1359,15 +1346,16 @@ mod proptest_tests {
             retain in any::<bool>(),
             dup in any::<bool>(),
         ) {
-            let packet = Packet::Publish(Publish {
-                dup,
-                qos: QoS::AtLeastOnce,
-                retain,
+            let mut publish = Publish::with_properties(
                 topic,
-                packet_id: Some(packet_id),
-                payload: Bytes::from(payload),
-                properties: Properties::default(),
-            });
+                Bytes::from(payload),
+                QoS::AtLeastOnce,
+                retain,
+                Properties::default(),
+            );
+            publish.dup = dup;
+            publish.packet_id = Some(packet_id);
+            let packet = Packet::Publish(publish);
             let encoded = encode_packet(&packet, ProtocolVersion::V311);
             let decoded = decode_packet(&encoded, Some(ProtocolVersion::V311)).unwrap();
             prop_assert_eq!(packet, decoded);

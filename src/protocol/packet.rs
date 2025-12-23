@@ -2,7 +2,10 @@
 //!
 //! Unified packet types supporting both MQTT v3.1.1 and v5.0
 
+use std::sync::Arc;
+
 use bytes::Bytes;
+use smallvec::SmallVec;
 
 use super::{Properties, ProtocolVersion, QoS, ReasonCode, SubscriptionOptions};
 
@@ -122,35 +125,146 @@ impl Default for ConnAck {
     }
 }
 
+/// Shared immutable data from a decoded PUBLISH packet.
+/// Cloning is cheap (just Arc increment).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishCore {
+    /// Topic name (Arc for zero-copy fan-out)
+    pub topic: Arc<str>,
+    /// Payload (Bytes is already Arc-based)
+    pub payload: Bytes,
+    /// Original properties from the packet (v5.0 only)
+    pub properties: Properties,
+}
+
 /// PUBLISH packet (bidirectional)
+///
+/// Uses Arc<PublishCore> for zero-copy message fan-out.
+/// The core (topic, payload, properties) is shared across all subscribers.
+/// Per-subscriber fields (qos, dup, retain, packet_id, subscription_ids) are cheap to clone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Publish {
+    /// Shared immutable core data (topic, payload, base properties)
+    pub core: Arc<PublishCore>,
     /// Duplicate delivery flag
     pub dup: bool,
     /// Quality of service
     pub qos: QoS,
     /// Retain flag
     pub retain: bool,
-    /// Topic name
-    pub topic: String,
     /// Packet identifier (present only for QoS > 0)
     pub packet_id: Option<u16>,
-    /// Payload
-    pub payload: Bytes,
-    /// Properties (v5.0 only)
-    pub properties: Properties,
+    /// Per-subscriber subscription identifiers (added during routing)
+    /// These are merged with core.properties.subscription_identifiers on encode
+    pub subscription_ids: SmallVec<[u32; 4]>,
+}
+
+impl Publish {
+    /// Create a new Publish packet with default settings
+    pub fn new(topic: impl Into<Arc<str>>, payload: Bytes) -> Self {
+        Self {
+            core: Arc::new(PublishCore {
+                topic: topic.into(),
+                payload,
+                properties: Properties::default(),
+            }),
+            dup: false,
+            qos: QoS::AtMostOnce,
+            retain: false,
+            packet_id: None,
+            subscription_ids: SmallVec::new(),
+        }
+    }
+
+    /// Create a Publish packet with full configuration
+    pub fn with_properties(
+        topic: impl Into<Arc<str>>,
+        payload: Bytes,
+        qos: QoS,
+        retain: bool,
+        properties: Properties,
+    ) -> Self {
+        Self {
+            core: Arc::new(PublishCore {
+                topic: topic.into(),
+                payload,
+                properties,
+            }),
+            dup: false,
+            qos,
+            retain,
+            packet_id: None,
+            subscription_ids: SmallVec::new(),
+        }
+    }
+
+    /// Access the topic
+    #[inline]
+    pub fn topic(&self) -> &str {
+        &self.core.topic
+    }
+
+    /// Access the payload
+    #[inline]
+    pub fn payload(&self) -> &Bytes {
+        &self.core.payload
+    }
+
+    /// Access the base properties
+    #[inline]
+    pub fn properties(&self) -> &Properties {
+        &self.core.properties
+    }
+
+    /// Set the topic (for topic alias resolution)
+    /// Creates a new core - use sparingly as this clones properties
+    pub fn set_topic(&mut self, topic: Arc<str>) {
+        self.core = Arc::new(PublishCore {
+            topic,
+            payload: self.core.payload.clone(),
+            properties: self.core.properties.clone(),
+        });
+    }
+
+    /// Create a copy with updated message expiry interval
+    /// Used when draining pending messages to update remaining expiry time
+    pub fn with_updated_message_expiry(&self, remaining_secs: Option<u32>) -> Publish {
+        let mut props = self.core.properties.clone();
+        props.message_expiry_interval = remaining_secs;
+        Publish {
+            core: Arc::new(PublishCore {
+                topic: self.core.topic.clone(),
+                payload: self.core.payload.clone(),
+                properties: props,
+            }),
+            dup: self.dup,
+            qos: self.qos,
+            retain: self.retain,
+            packet_id: self.packet_id,
+            subscription_ids: self.subscription_ids.clone(),
+        }
+    }
+
+    /// Get message expiry interval from properties
+    #[inline]
+    pub fn message_expiry_interval(&self) -> Option<u32> {
+        self.core.properties.message_expiry_interval
+    }
 }
 
 impl Default for Publish {
     fn default() -> Self {
         Self {
+            core: Arc::new(PublishCore {
+                topic: Arc::from(""),
+                payload: Bytes::new(),
+                properties: Properties::default(),
+            }),
             dup: false,
             qos: QoS::AtMostOnce,
             retain: false,
-            topic: String::new(),
             packet_id: None,
-            payload: Bytes::new(),
-            properties: Properties::default(),
+            subscription_ids: SmallVec::new(),
         }
     }
 }

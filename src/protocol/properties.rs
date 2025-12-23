@@ -765,4 +765,150 @@ impl Properties {
 
         Ok(())
     }
+
+    /// Calculate encoded size including extra subscription identifiers
+    /// Used for zero-copy publish where per-subscriber sub IDs are stored separately
+    pub fn encoded_size_with_extra_sub_ids(&self, extra_sub_ids: &[u32]) -> usize {
+        let mut size = self.encoded_size();
+        for id in extra_sub_ids {
+            size += 1 + variable_int_len(*id);
+        }
+        size
+    }
+
+    /// Encode properties with extra subscription identifiers
+    /// Used for zero-copy publish where per-subscriber sub IDs are stored separately
+    pub fn encode_with_extra_sub_ids(
+        &self,
+        buf: &mut BytesMut,
+        extra_sub_ids: &[u32],
+    ) -> Result<(), EncodeError> {
+        let size = self.encoded_size_with_extra_sub_ids(extra_sub_ids);
+        write_variable_int(buf, size as u32)?;
+
+        // Encode base properties (without the length prefix)
+        self.encode_content(buf)?;
+
+        // Encode extra subscription identifiers
+        for id in extra_sub_ids {
+            buf.put_u8(PropertyId::SubscriptionIdentifier as u8);
+            write_variable_int(buf, *id)?;
+        }
+
+        Ok(())
+    }
+
+    /// Encode properties content without length prefix
+    fn encode_content(&self, buf: &mut BytesMut) -> Result<(), EncodeError> {
+        if let Some(v) = self.payload_format_indicator {
+            buf.put_u8(PropertyId::PayloadFormatIndicator as u8);
+            buf.put_u8(v);
+        }
+        if let Some(v) = self.message_expiry_interval {
+            buf.put_u8(PropertyId::MessageExpiryInterval as u8);
+            buf.put_u32(v);
+        }
+        if let Some(ref s) = self.content_type {
+            buf.put_u8(PropertyId::ContentType as u8);
+            write_string(buf, s)?;
+        }
+        if let Some(ref s) = self.response_topic {
+            buf.put_u8(PropertyId::ResponseTopic as u8);
+            write_string(buf, s)?;
+        }
+        if let Some(ref d) = self.correlation_data {
+            buf.put_u8(PropertyId::CorrelationData as u8);
+            write_binary(buf, d)?;
+        }
+        for id in &self.subscription_identifiers {
+            buf.put_u8(PropertyId::SubscriptionIdentifier as u8);
+            write_variable_int(buf, *id)?;
+        }
+        if let Some(v) = self.session_expiry_interval {
+            buf.put_u8(PropertyId::SessionExpiryInterval as u8);
+            buf.put_u32(v);
+        }
+        if let Some(ref s) = self.assigned_client_identifier {
+            buf.put_u8(PropertyId::AssignedClientIdentifier as u8);
+            write_string(buf, s)?;
+        }
+        if let Some(v) = self.server_keep_alive {
+            buf.put_u8(PropertyId::ServerKeepAlive as u8);
+            buf.put_u16(v);
+        }
+        if let Some(ref s) = self.authentication_method {
+            buf.put_u8(PropertyId::AuthenticationMethod as u8);
+            write_string(buf, s)?;
+        }
+        if let Some(ref d) = self.authentication_data {
+            buf.put_u8(PropertyId::AuthenticationData as u8);
+            write_binary(buf, d)?;
+        }
+        if let Some(v) = self.request_problem_information {
+            buf.put_u8(PropertyId::RequestProblemInformation as u8);
+            buf.put_u8(v);
+        }
+        if let Some(v) = self.will_delay_interval {
+            buf.put_u8(PropertyId::WillDelayInterval as u8);
+            buf.put_u32(v);
+        }
+        if let Some(v) = self.request_response_information {
+            buf.put_u8(PropertyId::RequestResponseInformation as u8);
+            buf.put_u8(v);
+        }
+        if let Some(ref s) = self.response_information {
+            buf.put_u8(PropertyId::ResponseInformation as u8);
+            write_string(buf, s)?;
+        }
+        if let Some(ref s) = self.server_reference {
+            buf.put_u8(PropertyId::ServerReference as u8);
+            write_string(buf, s)?;
+        }
+        if let Some(ref s) = self.reason_string {
+            buf.put_u8(PropertyId::ReasonString as u8);
+            write_string(buf, s)?;
+        }
+        if let Some(v) = self.receive_maximum {
+            buf.put_u8(PropertyId::ReceiveMaximum as u8);
+            buf.put_u16(v);
+        }
+        if let Some(v) = self.topic_alias_maximum {
+            buf.put_u8(PropertyId::TopicAliasMaximum as u8);
+            buf.put_u16(v);
+        }
+        if let Some(v) = self.topic_alias {
+            buf.put_u8(PropertyId::TopicAlias as u8);
+            buf.put_u16(v);
+        }
+        if let Some(v) = self.maximum_qos {
+            buf.put_u8(PropertyId::MaximumQoS as u8);
+            buf.put_u8(v);
+        }
+        if let Some(v) = self.retain_available {
+            buf.put_u8(PropertyId::RetainAvailable as u8);
+            buf.put_u8(v);
+        }
+        for (k, v) in &self.user_properties {
+            buf.put_u8(PropertyId::UserProperty as u8);
+            write_string(buf, k)?;
+            write_string(buf, v)?;
+        }
+        if let Some(v) = self.maximum_packet_size {
+            buf.put_u8(PropertyId::MaximumPacketSize as u8);
+            buf.put_u32(v);
+        }
+        if let Some(v) = self.wildcard_subscription_available {
+            buf.put_u8(PropertyId::WildcardSubscriptionAvailable as u8);
+            buf.put_u8(v);
+        }
+        if let Some(v) = self.subscription_identifier_available {
+            buf.put_u8(PropertyId::SubscriptionIdentifierAvailable as u8);
+            buf.put_u8(v);
+        }
+        if let Some(v) = self.shared_subscription_available {
+            buf.put_u8(PropertyId::SharedSubscriptionAvailable as u8);
+            buf.put_u8(v);
+        }
+        Ok(())
+    }
 }
