@@ -54,6 +54,7 @@ fn test_broker_config(port: u16) -> BrokerConfig {
         max_awaiting_rel: 100,
         retry_interval: Duration::from_secs(30),
         outbound_channel_capacity: 1024,
+        max_topic_levels: 0,
     }
 }
 

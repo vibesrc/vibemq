@@ -91,6 +91,10 @@ pub struct BrokerConfig {
     /// This buffer holds messages waiting to be written to the client socket.
     /// Higher values handle burst traffic better but use more memory per connection.
     pub outbound_channel_capacity: usize,
+    /// Maximum number of topic levels (depth) allowed.
+    /// Topic levels are separated by '/'. For example, "a/b/c" has 3 levels.
+    /// 0 = unlimited.
+    pub max_topic_levels: usize,
 }
 
 /// TLS configuration for the broker
@@ -134,6 +138,7 @@ impl Default for BrokerConfig {
             max_awaiting_rel: 100,
             retry_interval: Duration::from_secs(30),
             outbound_channel_capacity: 1024,
+            max_topic_levels: 0, // 0 = unlimited
         }
     }
 }

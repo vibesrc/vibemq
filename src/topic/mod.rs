@@ -14,7 +14,8 @@ pub mod validation;
 
 pub use trie::TopicTrie;
 pub use validation::{
-    topic_matches_filter, validate_topic_filter, validate_topic_name, TopicLevel,
+    topic_matches_filter, validate_topic_filter, validate_topic_filter_with_max_levels,
+    validate_topic_name, validate_topic_name_with_max_levels, TopicLevel,
 };
 
 use ahash::AHashMap;

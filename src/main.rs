@@ -280,6 +280,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             file_config.limits.outbound_channel_capacity
         },
+        max_topic_levels: file_config.limits.max_topic_levels,
     };
 
     info!("Starting VibeMQ MQTT Broker");

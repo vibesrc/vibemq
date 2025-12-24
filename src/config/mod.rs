@@ -228,6 +228,11 @@ pub struct LimitsConfig {
     /// Set to 0 for unbounded (not recommended for production).
     #[serde(default = "default_outbound_channel_capacity")]
     pub outbound_channel_capacity: usize,
+    /// Maximum number of topic levels (depth) allowed.
+    /// Topic levels are separated by '/'. For example, "a/b/c" has 3 levels.
+    /// Set to 0 for unlimited (default).
+    #[serde(default)]
+    pub max_topic_levels: usize,
 }
 
 fn default_max_connections() -> usize {
@@ -262,6 +267,7 @@ impl Default for LimitsConfig {
             max_awaiting_rel: default_max_awaiting_rel(),
             retry_interval: default_retry_interval(),
             outbound_channel_capacity: default_outbound_channel_capacity(),
+            max_topic_levels: 0, // 0 = unlimited
         }
     }
 }
@@ -463,6 +469,7 @@ impl Config {
             .set_default("limits.max_awaiting_rel", 100)?
             .set_default("limits.retry_interval", 30)?
             .set_default("limits.outbound_channel_capacity", 1024)?
+            .set_default("limits.max_topic_levels", 0)?
             .set_default("session.default_keep_alive", 60)?
             .set_default("session.max_keep_alive", 65535)?
             .set_default("session.expiry_check_interval", 60)?

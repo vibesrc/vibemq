@@ -13,7 +13,7 @@ use super::{Connection, ConnectionError};
 use crate::broker::{BrokerEvent, RetainedMessage};
 use crate::protocol::{Packet, Properties, PubAck, PubRec, Publish, QoS, ReasonCode};
 use crate::session::{QueueResult, Session};
-use crate::topic::validate_topic_name;
+use crate::topic::validate_topic_name_with_max_levels;
 
 impl<S> Connection<S>
 where
@@ -27,7 +27,9 @@ where
         mut publish: Publish,
     ) -> Result<(), ConnectionError> {
         // Validate topic name
-        if let Err(e) = validate_topic_name(&publish.topic) {
+        if let Err(e) =
+            validate_topic_name_with_max_levels(&publish.topic, self.config.max_topic_levels)
+        {
             warn!("Invalid topic name from {}: {}", client_id, e);
             // For v5.0, send PUBACK/PUBREC with error
             if publish.qos != QoS::AtMostOnce {

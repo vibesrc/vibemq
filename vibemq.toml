@@ -45,6 +45,9 @@ retry_interval = 30
 # Per-connection outbound message channel capacity (default: 1024)
 # Higher values handle burst traffic better but use more memory per connection
 outbound_channel_capacity = 1024
+# Maximum topic levels (depth) allowed (default: 0 = unlimited)
+# Topic levels are separated by '/'. For example, "a/b/c" has 3 levels.
+# max_topic_levels = 128
 
 [metrics]
 enabled = true

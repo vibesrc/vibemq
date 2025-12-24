@@ -13,7 +13,7 @@ use crate::protocol::{
     Subscribe, UnsubAck, Unsubscribe,
 };
 use crate::session::Session;
-use crate::topic::{validate_topic_filter, Subscription};
+use crate::topic::{validate_topic_filter_with_max_levels, Subscription};
 
 impl<S> Connection<S>
 where
@@ -44,7 +44,9 @@ where
 
         for sub in &subscribe.subscriptions {
             // Validate topic filter
-            if validate_topic_filter(&sub.filter).is_err() {
+            if validate_topic_filter_with_max_levels(&sub.filter, self.config.max_topic_levels)
+                .is_err()
+            {
                 reason_codes.push(ReasonCode::TopicFilterInvalid);
                 sub_info.push((
                     QoS::AtMostOnce,

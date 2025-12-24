@@ -36,7 +36,23 @@ pub fn parse_levels(topic: &str) -> impl Iterator<Item = TopicLevel<'_>> {
 /// - Must not exceed 65535 bytes
 /// - Must not contain null character
 /// - Must not contain wildcards (+ or #)
+/// - Must not exceed max_topic_levels if set (0 = unlimited)
 pub fn validate_topic_name(topic: &str) -> Result<(), &'static str> {
+    validate_topic_name_with_max_levels(topic, 0)
+}
+
+/// Validate a topic name with configurable max levels
+///
+/// Topic names:
+/// - Must be at least 1 character
+/// - Must not exceed 65535 bytes
+/// - Must not contain null character
+/// - Must not contain wildcards (+ or #)
+/// - Must not exceed max_topic_levels if set (0 = unlimited)
+pub fn validate_topic_name_with_max_levels(
+    topic: &str,
+    max_topic_levels: usize,
+) -> Result<(), &'static str> {
     if topic.is_empty() {
         return Err("topic name cannot be empty");
     }
@@ -51,6 +67,14 @@ pub fn validate_topic_name(topic: &str) -> Result<(), &'static str> {
 
     if topic.contains('+') || topic.contains('#') {
         return Err("topic name cannot contain wildcards");
+    }
+
+    // Check max topic levels (0 = unlimited)
+    if max_topic_levels > 0 {
+        let level_count = topic.split('/').count();
+        if level_count > max_topic_levels {
+            return Err("topic exceeds maximum allowed levels");
+        }
     }
 
     Ok(())
@@ -68,7 +92,28 @@ pub fn validate_topic_name(topic: &str) -> Result<(), &'static str> {
 ///   - The last character
 /// - Single-level wildcard (+) must occupy an entire level
 /// - Shared subscriptions ($share/{group}/{filter}) are also supported
+/// - Must not exceed max_topic_levels if set (0 = unlimited)
 pub fn validate_topic_filter(filter: &str) -> Result<(), &'static str> {
+    validate_topic_filter_with_max_levels(filter, 0)
+}
+
+/// Validate a topic filter with configurable max levels
+///
+/// Topic filters:
+/// - Must be at least 1 character
+/// - Must not exceed 65535 bytes
+/// - Must not contain null character
+/// - Multi-level wildcard (#) must be:
+///   - The only character in the filter, OR
+///   - Preceded by a level separator (/)
+///   - The last character
+/// - Single-level wildcard (+) must occupy an entire level
+/// - Shared subscriptions ($share/{group}/{filter}) are also supported
+/// - Must not exceed max_topic_levels if set (0 = unlimited)
+pub fn validate_topic_filter_with_max_levels(
+    filter: &str,
+    max_topic_levels: usize,
+) -> Result<(), &'static str> {
     if filter.is_empty() {
         return Err("topic filter cannot be empty");
     }
@@ -105,6 +150,11 @@ pub fn validate_topic_filter(filter: &str) -> Result<(), &'static str> {
     };
 
     let levels: Vec<&str> = actual_filter.split('/').collect();
+
+    // Check max topic levels (0 = unlimited)
+    if max_topic_levels > 0 && levels.len() > max_topic_levels {
+        return Err("topic filter exceeds maximum allowed levels");
+    }
 
     for (i, level) in levels.iter().enumerate() {
         if level.contains('#') {
@@ -245,5 +295,56 @@ mod tests {
         assert!(!topic_matches_filter("$SYS/test", "#"));
         assert!(topic_matches_filter("$SYS/test", "$SYS/+"));
         assert!(topic_matches_filter("$SYS/test", "$SYS/#"));
+    }
+
+    #[test]
+    fn test_validate_topic_name_max_levels() {
+        // 0 = unlimited (no limit enforced)
+        assert!(validate_topic_name_with_max_levels("a/b/c/d/e", 0).is_ok());
+
+        // Within limit
+        assert!(validate_topic_name_with_max_levels("a", 3).is_ok());
+        assert!(validate_topic_name_with_max_levels("a/b", 3).is_ok());
+        assert!(validate_topic_name_with_max_levels("a/b/c", 3).is_ok());
+
+        // Exceeds limit
+        assert!(validate_topic_name_with_max_levels("a/b/c/d", 3).is_err());
+        assert!(validate_topic_name_with_max_levels("a/b/c/d/e", 3).is_err());
+
+        // Edge cases
+        assert!(validate_topic_name_with_max_levels("a", 1).is_ok());
+        assert!(validate_topic_name_with_max_levels("a/b", 1).is_err());
+
+        // Empty levels still count
+        assert!(validate_topic_name_with_max_levels("/a/b", 3).is_ok()); // 3 levels: "", "a", "b"
+        assert!(validate_topic_name_with_max_levels("/a/b/c", 3).is_err()); // 4 levels: "", "a", "b", "c"
+    }
+
+    #[test]
+    fn test_validate_topic_filter_max_levels() {
+        // 0 = unlimited (no limit enforced)
+        assert!(validate_topic_filter_with_max_levels("a/b/c/d/e", 0).is_ok());
+        assert!(validate_topic_filter_with_max_levels("a/+/c/#", 0).is_ok());
+
+        // Within limit
+        assert!(validate_topic_filter_with_max_levels("a", 3).is_ok());
+        assert!(validate_topic_filter_with_max_levels("a/b", 3).is_ok());
+        assert!(validate_topic_filter_with_max_levels("a/b/c", 3).is_ok());
+        assert!(validate_topic_filter_with_max_levels("a/+/c", 3).is_ok());
+        assert!(validate_topic_filter_with_max_levels("a/b/#", 3).is_ok());
+
+        // Exceeds limit
+        assert!(validate_topic_filter_with_max_levels("a/b/c/d", 3).is_err());
+        assert!(validate_topic_filter_with_max_levels("a/+/c/d", 3).is_err());
+        assert!(validate_topic_filter_with_max_levels("a/b/c/#", 3).is_err()); // # counts as a level
+
+        // Edge cases
+        assert!(validate_topic_filter_with_max_levels("#", 1).is_ok());
+        assert!(validate_topic_filter_with_max_levels("+", 1).is_ok());
+        assert!(validate_topic_filter_with_max_levels("a/#", 1).is_err());
+
+        // Shared subscriptions - only the actual filter part counts
+        assert!(validate_topic_filter_with_max_levels("$share/group/a/b/c", 3).is_ok());
+        assert!(validate_topic_filter_with_max_levels("$share/group/a/b/c/d", 3).is_err());
     }
 }
