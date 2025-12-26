@@ -391,7 +391,7 @@ impl Properties {
                         return Err(DecodeError::DuplicateProperty(prop_id as u8));
                     }
                     let (s, len) = read_string(&buf[pos..])?;
-                    props.content_type = Some(s.to_string());
+                    props.content_type = Some(s.into());
                     pos += len;
                 }
                 PropertyId::ResponseTopic => {
@@ -399,7 +399,7 @@ impl Properties {
                         return Err(DecodeError::DuplicateProperty(prop_id as u8));
                     }
                     let (s, len) = read_string(&buf[pos..])?;
-                    props.response_topic = Some(s.to_string());
+                    props.response_topic = Some(s.into());
                     pos += len;
                 }
                 PropertyId::CorrelationData => {
@@ -440,7 +440,7 @@ impl Properties {
                         return Err(DecodeError::DuplicateProperty(prop_id as u8));
                     }
                     let (s, len) = read_string(&buf[pos..])?;
-                    props.assigned_client_identifier = Some(s.to_string());
+                    props.assigned_client_identifier = Some(s.into());
                     pos += len;
                 }
                 PropertyId::ServerKeepAlive => {
@@ -458,7 +458,7 @@ impl Properties {
                         return Err(DecodeError::DuplicateProperty(prop_id as u8));
                     }
                     let (s, len) = read_string(&buf[pos..])?;
-                    props.authentication_method = Some(s.to_string());
+                    props.authentication_method = Some(s.into());
                     pos += len;
                 }
                 PropertyId::AuthenticationData => {
@@ -509,7 +509,7 @@ impl Properties {
                         return Err(DecodeError::DuplicateProperty(prop_id as u8));
                     }
                     let (s, len) = read_string(&buf[pos..])?;
-                    props.response_information = Some(s.to_string());
+                    props.response_information = Some(s.into());
                     pos += len;
                 }
                 PropertyId::ServerReference => {
@@ -517,7 +517,7 @@ impl Properties {
                         return Err(DecodeError::DuplicateProperty(prop_id as u8));
                     }
                     let (s, len) = read_string(&buf[pos..])?;
-                    props.server_reference = Some(s.to_string());
+                    props.server_reference = Some(s.into());
                     pos += len;
                 }
                 PropertyId::ReasonString => {
@@ -525,7 +525,7 @@ impl Properties {
                         return Err(DecodeError::DuplicateProperty(prop_id as u8));
                     }
                     let (s, len) = read_string(&buf[pos..])?;
-                    props.reason_string = Some(s.to_string());
+                    props.reason_string = Some(s.into());
                     pos += len;
                 }
                 PropertyId::ReceiveMaximum => {
