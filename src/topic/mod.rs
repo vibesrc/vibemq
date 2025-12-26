@@ -22,10 +22,13 @@ use ahash::AHashMap;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use smallvec::SmallVec;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::protocol::QoS;
+
+/// Maximum number of entries in the topic cache
+const TOPIC_CACHE_MAX_SIZE: usize = 1024;
 
 /// A subscription entry
 #[derive(Debug, Clone)]
@@ -61,11 +64,21 @@ pub fn parse_shared_subscription(filter: &str) -> Option<(&str, &str)> {
     None
 }
 
+/// Cached topic match result
+struct CachedMatch {
+    subscriptions: SmallVec<[Subscription; 16]>,
+    generation: u64,
+}
+
 /// Thread-safe subscription store using topic trie
 pub struct SubscriptionStore {
     trie: RwLock<TopicTrie<Vec<Subscription>>>,
     /// Round-robin counters for shared subscriptions, keyed by share group
     share_counters: DashMap<Arc<str>, AtomicUsize>,
+    /// Cache of topic -> matching subscriptions (invalidated on subscription changes)
+    topic_cache: DashMap<String, CachedMatch>,
+    /// Generation counter - incremented on any subscription change
+    generation: AtomicU64,
 }
 
 impl SubscriptionStore {
@@ -73,6 +86,18 @@ impl SubscriptionStore {
         Self {
             trie: RwLock::new(TopicTrie::new()),
             share_counters: DashMap::new(),
+            topic_cache: DashMap::new(),
+            generation: AtomicU64::new(0),
+        }
+    }
+
+    /// Invalidate cache by incrementing generation
+    #[inline]
+    fn invalidate_cache(&self) {
+        self.generation.fetch_add(1, Ordering::Release);
+        // Optionally clear cache if it's too large
+        if self.topic_cache.len() > TOPIC_CACHE_MAX_SIZE * 2 {
+            self.topic_cache.clear();
         }
     }
 
@@ -101,6 +126,8 @@ impl SubscriptionStore {
         } else {
             trie.insert(actual_filter, vec![subscription]);
         }
+        drop(trie);
+        self.invalidate_cache();
     }
 
     /// Remove a subscription
@@ -114,7 +141,7 @@ impl SubscriptionStore {
             };
 
         let mut trie = self.trie.write();
-        if let Some(subs) = trie.get_mut(actual_filter) {
+        let removed = if let Some(subs) = trie.get_mut(actual_filter) {
             let len_before = subs.len();
             subs.retain(|s| {
                 if s.client_id.as_ref() != client_id {
@@ -134,7 +161,12 @@ impl SubscriptionStore {
             removed
         } else {
             false
+        };
+        drop(trie);
+        if removed {
+            self.invalidate_cache();
         }
+        removed
     }
 
     /// Remove all subscriptions for a client
@@ -144,48 +176,70 @@ impl SubscriptionStore {
             subs.retain(|s| s.client_id.as_ref() != client_id);
             subs.is_empty()
         });
+        drop(trie);
+        self.invalidate_cache();
     }
 
     /// Find all matching subscriptions for a topic
     /// For shared subscriptions, only one subscriber per share group is returned (round-robin)
     ///
-    /// Performance: Uses SmallVec to avoid heap allocation for typical workloads
-    /// (most topics have fewer than 16 subscribers)
+    /// Performance: Uses topic cache for frequently-published topics (O(1) lookup)
+    /// Cache is invalidated when subscriptions change.
     pub fn matches(&self, topic: &str) -> SmallVec<[Subscription; 16]> {
+        let current_gen = self.generation.load(Ordering::Acquire);
+
+        // Check cache first (only for non-shared subscriptions)
+        if let Some(cached) = self.topic_cache.get(topic) {
+            if cached.generation == current_gen {
+                return cached.subscriptions.clone();
+            }
+        }
+
+        // Cache miss or stale - compute matches
         let trie = self.trie.read();
-        // Pre-allocate with reasonable capacity for typical workloads
         let mut result: SmallVec<[Subscription; 16]> = SmallVec::new();
-        // Use AHashMap for faster hashing, SmallVec for values (most share groups have few subscribers)
         let mut share_groups: AHashMap<Arc<str>, SmallVec<[Subscription; 4]>> =
             AHashMap::with_capacity(4);
+        let mut has_shared = false;
 
         trie.matches(topic, |subs| {
             for sub in subs {
                 if let Some(ref group) = sub.share_group {
-                    // Collect shared subscriptions by group
+                    has_shared = true;
                     share_groups
                         .entry(group.clone())
                         .or_default()
                         .push(sub.clone());
                 } else {
-                    // Non-shared subscriptions go directly to result
                     result.push(sub.clone());
                 }
             }
         });
+        drop(trie);
 
         // For each share group, pick one subscriber using round-robin
         for (group, subs) in share_groups {
             if subs.is_empty() {
                 continue;
             }
-            // Get or create counter for this group
             let counter = self
                 .share_counters
                 .entry(group)
                 .or_insert_with(|| AtomicUsize::new(0));
             let idx = counter.fetch_add(1, Ordering::Relaxed) % subs.len();
             result.push(subs[idx].clone());
+        }
+
+        // Cache result only if no shared subscriptions (round-robin makes them uncacheable)
+        // and cache isn't too large
+        if !has_shared && self.topic_cache.len() < TOPIC_CACHE_MAX_SIZE {
+            self.topic_cache.insert(
+                topic.to_string(),
+                CachedMatch {
+                    subscriptions: result.clone(),
+                    generation: current_gen,
+                },
+            );
         }
 
         result
