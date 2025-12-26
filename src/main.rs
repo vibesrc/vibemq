@@ -17,6 +17,12 @@
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+// Enable jemalloc profiling by default when pprof feature is enabled
+#[cfg(feature = "pprof")]
+#[allow(non_upper_case_globals)]
+#[export_name = "_rjem_malloc_conf"]
+pub static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -119,6 +125,12 @@ struct Args {
     /// Log level (error, warn, info, debug, trace)
     #[arg(short, long, value_enum)]
     log_level: Option<LogLevel>,
+
+    /// Output directory for profiling data (enables profiling for entire run)
+    /// CPU and heap profiles will be written as text files on shutdown
+    #[cfg(feature = "pprof")]
+    #[arg(long)]
+    profile_output: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -412,7 +424,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start profiling server if feature is enabled
     #[cfg(feature = "pprof")]
-    {
+    let continuous_profiler = {
+        vibemq::profiling::check_jemalloc_profiling();
         let pprof_addr: std::net::SocketAddr = vibemq::profiling::DEFAULT_BIND.parse().unwrap();
         info!("  Profiling: enabled (http://{})", pprof_addr);
         tokio::spawn(async move {
@@ -420,10 +433,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tracing::error!("Profiling server error: {}", e);
             }
         });
-    }
+
+        // Start continuous profiler if output directory specified
+        if let Some(ref output_dir) = args.profile_output {
+            info!(
+                "  Profile output: {:?} (will dump on shutdown)",
+                output_dir
+            );
+            match vibemq::profiling::ContinuousProfiler::start() {
+                Ok(profiler) => Some((profiler, output_dir.clone())),
+                Err(e) => {
+                    tracing::error!("Failed to start continuous profiler: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    };
 
     // Run the broker (it handles Ctrl+C internally via the shutdown signal)
-    broker.run().await?;
+    let result = broker.run().await;
 
+    // Dump profiles on shutdown if continuous profiling was enabled (always, even on error)
+    #[cfg(feature = "pprof")]
+    if let Some((profiler, output_dir)) = continuous_profiler {
+        if let Err(e) = profiler.dump_profiles(&output_dir) {
+            tracing::error!("Failed to dump profiles: {}", e);
+        }
+    }
+
+    result?;
     Ok(())
 }
