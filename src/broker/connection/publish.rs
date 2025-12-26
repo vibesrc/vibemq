@@ -255,7 +255,7 @@ where
     }
 
     /// Route a message to subscribers
-    /// Performance: Uses AHashMap for deduplication and SmallVec for subscription IDs
+    /// Uses AHashMap for O(n) deduplication regardless of subscriber count
     pub(crate) async fn route_message(
         &self,
         sender_id: &Arc<str>,
@@ -264,43 +264,48 @@ where
         let matches = self.subscriptions.matches(&publish.topic);
 
         // Deduplicate by client_id, keeping highest QoS and collecting ALL subscription IDs
-        // Uses SmallVec for subscription_ids since most messages match few subscriptions
         struct ClientSub {
             qos: QoS,
             retain_as_published: bool,
             subscription_ids: SmallVec<[u32; 4]>,
         }
-        // Use AHashMap for faster hashing, pre-allocate for typical workload
-        let mut client_subs: AHashMap<Arc<str>, ClientSub> = AHashMap::with_capacity(matches.len());
+
+        let mut client_subs: AHashMap<Arc<str>, ClientSub> =
+            AHashMap::with_capacity(matches.len());
+
         for sub in matches {
             // Skip sender if no_local is set
             if sub.no_local && sub.client_id == *sender_id {
                 continue;
             }
 
-            let entry = client_subs
-                .entry(sub.client_id.clone())
-                .or_insert(ClientSub {
-                    qos: QoS::AtMostOnce,
-                    retain_as_published: false,
-                    subscription_ids: SmallVec::new(),
-                });
-
-            // Update QoS to highest
-            if sub.qos > entry.qos {
-                entry.qos = sub.qos;
-            }
-
-            // If ANY matching subscription has retain_as_published=true, preserve retain flag
-            if sub.retain_as_published {
-                entry.retain_as_published = true;
-            }
-
-            // Collect ALL subscription identifiers
-            if let Some(id) = sub.subscription_id {
-                if !entry.subscription_ids.contains(&id) {
-                    entry.subscription_ids.push(id);
+            if let Some(entry) = client_subs.get_mut(&sub.client_id) {
+                // Update existing entry
+                if sub.qos > entry.qos {
+                    entry.qos = sub.qos;
                 }
+                if sub.retain_as_published {
+                    entry.retain_as_published = true;
+                }
+                if let Some(id) = sub.subscription_id {
+                    if !entry.subscription_ids.contains(&id) {
+                        entry.subscription_ids.push(id);
+                    }
+                }
+            } else {
+                // New client - add entry
+                let mut subscription_ids = SmallVec::new();
+                if let Some(id) = sub.subscription_id {
+                    subscription_ids.push(id);
+                }
+                client_subs.insert(
+                    sub.client_id.clone(),
+                    ClientSub {
+                        qos: sub.qos,
+                        retain_as_published: sub.retain_as_published,
+                        subscription_ids,
+                    },
+                );
             }
         }
 
