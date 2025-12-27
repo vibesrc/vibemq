@@ -4,7 +4,7 @@
 
 use std::net::SocketAddr;
 
-use crate::mqtt_conformance::v5::{build_connect_v5, connect_v5};
+use crate::mqtt_conformance::v5::connect_v5;
 use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient};
 
 // ============================================================================
@@ -24,10 +24,10 @@ async fn test_mqtt_4_12_0_1_auth_method_packet_order() {
     let connect_with_auth = [
         0x10, 0x17, // CONNECT
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x05,       // Protocol version
-        0x02,       // Clean Start
+        0x05, // Protocol version
+        0x02, // Clean Start
         0x00, 0x3C, // Keep alive
-        0x08,       // Properties length = 8
+        0x08, // Properties length = 8
         0x15, 0x00, 0x05, b'p', b'l', b'a', b'i', b'n', // Auth Method = "plain"
         0x00, 0x04, b'a', b'u', b't', b'h', // Client ID
     ];
@@ -122,8 +122,8 @@ async fn test_mqtt_4_12_1_1_reauthenticate() {
             // Connected successfully, try re-auth
             let reauth = [
                 0xF0, 0x0A, // AUTH
-                0x19,       // Reason Code = Re-authenticate
-                0x08,       // Properties length = 8
+                0x19, // Reason Code = Re-authenticate
+                0x08, // Properties length = 8
                 0x15, 0x00, 0x05, b'p', b'l', b'a', b'i', b'n', // Auth Method
             ];
             client.send_raw(&reauth).await;
@@ -162,8 +162,8 @@ async fn test_mqtt_4_12_1_2_reauth_same_method() {
             // Connected, try re-auth with different method (invalid) [MQTT-4.12.1-2]
             let reauth_diff_method = [
                 0xF0, 0x0A, // AUTH
-                0x19,       // Re-authenticate
-                0x08,       // Properties length
+                0x19, // Re-authenticate
+                0x08, // Properties length
                 0x15, 0x00, 0x05, b'o', b't', b'h', b'e', b'r', // Different Auth Method
             ];
             client.send_raw(&reauth_diff_method).await;

@@ -892,7 +892,10 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 /// Symbolicate addresses using backtrace crate (handles PIE and shared libs)
-fn symbolicate_addresses(addrs: &[String], _exe_path: Option<&std::path::PathBuf>) -> HashMap<String, String> {
+fn symbolicate_addresses(
+    addrs: &[String],
+    _exe_path: Option<&std::path::PathBuf>,
+) -> HashMap<String, String> {
     let mut symbols: HashMap<String, String> = HashMap::new();
 
     for addr_str in addrs {
@@ -906,8 +909,11 @@ fn symbolicate_addresses(addrs: &[String], _exe_path: Option<&std::path::PathBuf
                         if name_str.contains("jemalloc") || name_str.contains("_rjem_") {
                             return;
                         }
-                        let location = if let (Some(file), Some(line)) = (symbol.filename(), symbol.lineno()) {
-                            let filename = file.file_name()
+                        let location = if let (Some(file), Some(line)) =
+                            (symbol.filename(), symbol.lineno())
+                        {
+                            let filename = file
+                                .file_name()
                                 .map(|f| f.to_string_lossy().to_string())
                                 .unwrap_or_else(|| "?".to_string());
                             format!(" ({}:{})", filename, line)
@@ -961,9 +967,16 @@ impl ContinuousProfiler {
 
     /// Stop profiling and dump CPU and heap profiles to the specified directory.
     /// Creates `cpu_profile.txt` and `heap_profile.txt` files.
-    pub fn dump_profiles(self, output_dir: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn dump_profiles(
+        self,
+        output_dir: &Path,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let duration = self.start_time.elapsed();
-        info!("Stopping profiler after {:.1}s, dumping profiles to {:?}", duration.as_secs_f64(), output_dir);
+        info!(
+            "Stopping profiler after {:.1}s, dumping profiles to {:?}",
+            duration.as_secs_f64(),
+            output_dir
+        );
 
         // Ensure output directory exists
         std::fs::create_dir_all(output_dir)?;
@@ -988,7 +1001,11 @@ impl ContinuousProfiler {
         Ok(())
     }
 
-    fn dump_cpu_profile(self, output_dir: &Path, duration: std::time::Duration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn dump_cpu_profile(
+        self,
+        output_dir: &Path,
+        duration: std::time::Duration,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let report = self.guard.report().build()?;
 
         if report.data.is_empty() {
@@ -1007,8 +1024,11 @@ impl ContinuousProfiler {
             for symbols in &frames.frames {
                 if let Some(sym) = symbols.first() {
                     let name = sym.name();
-                    if name.contains("pprof::") || name.contains("backtrace::")
-                        || name.contains("__rust_try") || name.contains("catch_unwind") {
+                    if name.contains("pprof::")
+                        || name.contains("backtrace::")
+                        || name.contains("__rust_try")
+                        || name.contains("catch_unwind")
+                    {
                         continue;
                     }
                     *func_samples.entry(name).or_insert(0) += count;
@@ -1023,10 +1043,14 @@ impl ContinuousProfiler {
 
         // Build output
         let mut output = String::new();
-        output.push_str(&format!("VibeMQ CPU Profile\n"));
-        output.push_str(&format!("==================\n"));
+        output.push_str("VibeMQ CPU Profile\n");
+        output.push_str("==================\n");
         output.push_str(&format!("Duration: {:.1}s\n", duration.as_secs_f64()));
-        output.push_str(&format!("Total samples: {} ({:.1}s at 99Hz)\n", total_samples, total_samples as f64 / 99.0));
+        output.push_str(&format!(
+            "Total samples: {} ({:.1}s at 99Hz)\n",
+            total_samples,
+            total_samples as f64 / 99.0
+        ));
         output.push_str(&format!("Unique stacks: {}\n", report.data.len()));
         output.push_str(&format!("Unique functions: {}\n\n", sorted.len()));
 
@@ -1039,10 +1063,13 @@ impl ContinuousProfiler {
         }
 
         // Add collapsed stacks section
-        output.push_str(&format!("\n\nCollapsed Stacks (for flamegraph tools)\n"));
-        output.push_str(&format!("=======================================\n"));
+        output.push_str("\n\nCollapsed Stacks (for flamegraph tools)\n");
+        output.push_str("=======================================\n");
         for (frames, count) in &report.data {
-            let stack: Vec<String> = frames.frames.iter().rev()
+            let stack: Vec<String> = frames
+                .frames
+                .iter()
+                .rev()
                 .filter_map(|symbols| symbols.first().map(|s| s.name()))
                 .collect();
             if !stack.is_empty() {
@@ -1055,13 +1082,20 @@ impl ContinuousProfiler {
 
         let path = output_dir.join("cpu_profile.txt");
         std::fs::write(&path, &output)?;
-        info!("CPU profile written to {:?} ({} bytes, {} functions)", path, output.len(), sorted.len());
+        info!(
+            "CPU profile written to {:?} ({} bytes, {} functions)",
+            path,
+            output.len(),
+            sorted.len()
+        );
         Ok(())
     }
 }
 
 /// Dump heap profile to a text file in the specified directory.
-fn dump_heap_profile_to_file(output_dir: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn dump_heap_profile_to_file(
+    output_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Advance epoch to get fresh stats
     epoch::advance().map_err(|e| format!("epoch advance failed: {:?}", e))?;
 
@@ -1076,16 +1110,31 @@ fn dump_heap_profile_to_file(output_dir: &Path) -> Result<(), Box<dyn std::error
     output.push_str("===================\n\n");
     output.push_str("Memory Statistics (jemalloc)\n");
     output.push_str("----------------------------\n");
-    output.push_str(&format!("Allocated: {:>12} ({:.2} MB) - Total bytes allocated by application\n",
-        allocated, allocated as f64 / 1024.0 / 1024.0));
-    output.push_str(&format!("Active:    {:>12} ({:.2} MB) - Bytes in active pages (incl. fragmentation)\n",
-        active, active as f64 / 1024.0 / 1024.0));
-    output.push_str(&format!("Resident:  {:>12} ({:.2} MB) - Bytes in physically resident pages\n",
-        resident, resident as f64 / 1024.0 / 1024.0));
-    output.push_str(&format!("Mapped:    {:>12} ({:.2} MB) - Bytes in mapped memory regions\n",
-        mapped, mapped as f64 / 1024.0 / 1024.0));
-    output.push_str(&format!("Retained:  {:>12} ({:.2} MB) - Bytes retained for future allocations\n",
-        retained, retained as f64 / 1024.0 / 1024.0));
+    output.push_str(&format!(
+        "Allocated: {:>12} ({:.2} MB) - Total bytes allocated by application\n",
+        allocated,
+        allocated as f64 / 1024.0 / 1024.0
+    ));
+    output.push_str(&format!(
+        "Active:    {:>12} ({:.2} MB) - Bytes in active pages (incl. fragmentation)\n",
+        active,
+        active as f64 / 1024.0 / 1024.0
+    ));
+    output.push_str(&format!(
+        "Resident:  {:>12} ({:.2} MB) - Bytes in physically resident pages\n",
+        resident,
+        resident as f64 / 1024.0 / 1024.0
+    ));
+    output.push_str(&format!(
+        "Mapped:    {:>12} ({:.2} MB) - Bytes in mapped memory regions\n",
+        mapped,
+        mapped as f64 / 1024.0 / 1024.0
+    ));
+    output.push_str(&format!(
+        "Retained:  {:>12} ({:.2} MB) - Bytes retained for future allocations\n",
+        retained,
+        retained as f64 / 1024.0 / 1024.0
+    ));
 
     // Try to get allocation sites if heap profiling is enabled
     let path = std::env::temp_dir().join(format!("vibemq_heap_dump_{}.prof", std::process::id()));
@@ -1104,7 +1153,10 @@ fn dump_heap_profile_to_file(output_dir: &Path) -> Result<(), Box<dyn std::error
             std::mem::size_of::<*const i8>(),
         );
         if ret != 0 {
-            info!("jemalloc prof.dump returned error code: {} (run with MALLOC_CONF=prof:true)", ret);
+            info!(
+                "jemalloc prof.dump returned error code: {} (run with MALLOC_CONF=prof:true)",
+                ret
+            );
         }
         ret == 0
     };
@@ -1161,10 +1213,19 @@ fn dump_heap_profile_to_file(output_dir: &Path) -> Result<(), Box<dyn std::error
                 let symbols = symbolicate_addresses(&all_addrs, exe_path.as_ref());
 
                 for (i, (objects, bytes, stack)) in allocations.iter().take(30).enumerate() {
-                    let pct = if total_bytes > 0 { (*bytes as f64 / total_bytes as f64) * 100.0 } else { 0.0 };
+                    let pct = if total_bytes > 0 {
+                        (*bytes as f64 / total_bytes as f64) * 100.0
+                    } else {
+                        0.0
+                    };
 
-                    output.push_str(&format!("#{:<3} {:>12} ({:>5.1}%)  {} objects\n",
-                        i + 1, format_bytes(*bytes), pct, objects));
+                    output.push_str(&format!(
+                        "#{:<3} {:>12} ({:>5.1}%)  {} objects\n",
+                        i + 1,
+                        format_bytes(*bytes),
+                        pct,
+                        objects
+                    ));
 
                     // First show vibemq frames (the app code), then library frames
                     let mut app_frames: Vec<&str> = Vec::new();
@@ -1173,8 +1234,11 @@ fn dump_heap_profile_to_file(output_dir: &Path) -> Result<(), Box<dyn std::error
                     for addr in stack.split_whitespace().skip(1) {
                         if let Some(sym) = symbols.get(addr) {
                             // Skip jemalloc and allocator internals
-                            if sym.contains("jemalloc") || sym.contains("prof_")
-                                || sym.contains("imalloc") || sym.contains("rallocx") {
+                            if sym.contains("jemalloc")
+                                || sym.contains("prof_")
+                                || sym.contains("imalloc")
+                                || sym.contains("rallocx")
+                            {
                                 continue;
                             }
                             // Prioritize vibemq code
@@ -1215,7 +1279,11 @@ fn dump_heap_profile_to_file(output_dir: &Path) -> Result<(), Box<dyn std::error
 
     let out_path = output_dir.join("heap_profile.txt");
     std::fs::write(&out_path, &output)?;
-    info!("Heap profile written to {:?} ({} bytes)", out_path, output.len());
+    info!(
+        "Heap profile written to {:?} ({} bytes)",
+        out_path,
+        output.len()
+    );
     Ok(())
 }
 
@@ -1234,7 +1302,7 @@ pub fn check_jemalloc_profiling() {
             0,
         );
         info!("jemalloc opt.prof query returned: {} (value={})", ret, val);
-        
+
         // Check config.prof
         let cfg_name = CString::new("config.prof").unwrap();
         let mut cfg_val: bool = false;

@@ -27,7 +27,7 @@ async fn test_mqtt_3_8_1_1_subscribe_flags() {
     let invalid_subscribe = [
         0x80, 0x0A, // Wrong flags
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x04, b't', b'e', b's', b't', // Topic
         0x00, // QoS
     ];
@@ -59,7 +59,7 @@ async fn test_mqtt_3_8_2_1_subscription_identifier_zero_invalid() {
     let invalid_subscribe = [
         0x82, 0x0C, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x02,       // Properties length = 2
+        0x02, // Properties length = 2
         0x0B, 0x00, // Subscription Identifier = 0 (invalid)
         0x00, 0x04, b't', b'e', b's', b't', // Topic
         0x00, // QoS
@@ -158,7 +158,7 @@ async fn test_mqtt_3_8_3_3_shared_subscription_no_local_zero() {
     let invalid_subscribe = [
         0x82, 0x18, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x12, b'$', b's', b'h', b'a', b'r', b'e', b'/', b'g', b'r', b'o', b'u', b'p', b'/',
         b't', b'e', b's', b't', // Topic
         0x04, // QoS 0, No Local = 1 (invalid for shared)
@@ -328,7 +328,7 @@ async fn test_mqtt_3_8_4_4_multiple_topic_filters() {
     let subscribe = [
         0x82, 0x10, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x03, b'a', b'a', b'a', 0x00, // Topic "aaa", QoS 0
         0x00, 0x03, b'b', b'b', b'b', 0x01, // Topic "bbb", QoS 1
     ];
@@ -366,7 +366,7 @@ async fn test_mqtt_3_8_4_6_reason_code_per_topic() {
     let subscribe = [
         0x82, 0x14, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x03, b'x', b'x', b'x', 0x00, // Topic "xxx", QoS 0
         0x00, 0x03, b'y', b'y', b'y', 0x01, // Topic "yyy", QoS 1
         0x00, 0x03, b'z', b'z', b'z', 0x02, // Topic "zzz", QoS 2

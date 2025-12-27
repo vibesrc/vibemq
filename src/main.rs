@@ -436,10 +436,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Start continuous profiler if output directory specified
         if let Some(ref output_dir) = args.profile_output {
-            info!(
-                "  Profile output: {:?} (will dump on shutdown)",
-                output_dir
-            );
+            info!("  Profile output: {:?} (will dump on shutdown)", output_dir);
             match vibemq::profiling::ContinuousProfiler::start() {
                 Ok(profiler) => Some((profiler, output_dir.clone())),
                 Err(e) => {

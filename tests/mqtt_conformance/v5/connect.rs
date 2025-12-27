@@ -6,8 +6,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use crate::mqtt_conformance::v5::{
-    build_connect_v5, build_publish_v5, build_subscribe_v5, connect_v5, connect_v5_with_id,
-    connack_reason_code, connack_session_present, CONNECT_V5,
+    build_connect_v5, build_publish_v5, build_subscribe_v5, connect_v5, CONNECT_V5,
 };
 use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient};
 
@@ -77,8 +76,7 @@ async fn test_mqtt_3_1_2_1_unsupported_protocol_version() {
 
     // CONNECT with protocol version 99 (unsupported)
     let invalid_connect = [
-        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T',
-        99,   // Invalid protocol version
+        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T', 99, // Invalid protocol version
         0x02, 0x00, 0x3C, 0x00, 0x00, 0x01, b'a',
     ];
     client.send_raw(&invalid_connect).await;
@@ -123,7 +121,10 @@ async fn test_mqtt_3_1_2_3_reserved_flag_zero() {
     // Accept: connection close, CONNACK with error, or simply dropping the packet
     if let Some(data) = client.recv_raw(1000).await {
         if data[0] == 0x20 && data.len() >= 4 {
-            assert!(data[3] >= 0x80, "Should reject reserved flag=1 [MQTT-3.1.2-3]");
+            assert!(
+                data[3] >= 0x80,
+                "Should reject reserved flag=1 [MQTT-3.1.2-3]"
+            );
         }
     }
 
@@ -266,14 +267,13 @@ async fn test_mqtt_3_1_2_7_will_flag_stores_message() {
     let connect_with_will = [
         0x10, 0x22, // CONNECT
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x05,       // Protocol version
-        0x06,       // Flags: Clean Start=1, Will Flag=1
+        0x05, // Protocol version
+        0x06, // Flags: Clean Start=1, Will Flag=1
         0x00, 0x3C, // Keep alive
-        0x00,       // Connect properties length = 0
+        0x00, // Connect properties length = 0
         0x00, 0x08, b'w', b'i', b'l', b'l', b'c', b'l', b'i', b'e', // Client ID
-        0x00,       // Will properties length = 0
-        0x00, 0x0A, b'w', b'i', b'l', b'l', b'/', b't', b'o', b'p', b'i',
-        b'c', // Will Topic
+        0x00, // Will properties length = 0
+        0x00, 0x0A, b'w', b'i', b'l', b'l', b'/', b't', b'o', b'p', b'i', b'c', // Will Topic
         0x00, 0x07, b'g', b'o', b'o', b'd', b'b', b'y', b'e', // Will Payload
     ];
     client.send_raw(&connect_with_will).await;
@@ -370,7 +370,10 @@ async fn test_mqtt_3_1_2_11_will_flag_zero_qos_zero() {
     // Accept: connection close, CONNACK with error, or timeout
     if let Some(data) = client.recv_raw(1000).await {
         if data[0] == 0x20 && data.len() >= 4 {
-            assert!(data[3] >= 0x80, "Should reject invalid will flags [MQTT-3.1.2-11]");
+            assert!(
+                data[3] >= 0x80,
+                "Should reject invalid will flags [MQTT-3.1.2-11]"
+            );
         }
     }
 
@@ -433,7 +436,10 @@ async fn test_mqtt_3_1_2_13_will_flag_zero_retain_zero() {
     // Accept: connection close, CONNACK with error, or timeout
     if let Some(data) = client.recv_raw(1000).await {
         if data[0] == 0x20 && data.len() >= 4 {
-            assert!(data[3] >= 0x80, "Should reject invalid will retain [MQTT-3.1.2-13]");
+            assert!(
+                data[3] >= 0x80,
+                "Should reject invalid will retain [MQTT-3.1.2-13]"
+            );
         }
     }
 
@@ -531,8 +537,8 @@ async fn test_mqtt_3_1_2_22_keep_alive_timeout() {
 
     // CONNECT with very short keep alive (1 second)
     let connect = [
-        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02,
-        0x00, 0x01, // Keep alive = 1 second
+        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00,
+        0x01, // Keep alive = 1 second
         0x00, 0x00, 0x01, b'k',
     ];
     client.send_raw(&connect).await;
@@ -677,7 +683,7 @@ async fn test_mqtt_3_1_2_14_will_retain_zero_not_retained() {
     let _ = late_sub.recv_raw(1000).await; // SUBACK
 
     // Should not receive retained message
-    let received = late_sub.recv_raw(500).await;
+    let _received = late_sub.recv_raw(500).await;
     // Either no message or non-retained message is acceptable
 
     broker_handle.abort();
@@ -710,7 +716,7 @@ async fn test_mqtt_3_1_2_23_session_expiry_stores_state() {
         0x10, 0x14, // CONNECT
         0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x00, // Clean Start=0
         0x00, 0x3C, // Keep alive
-        0x05,       // Properties length = 5
+        0x05, // Properties length = 5
         0x11, 0x00, 0x00, 0x0E, 0x10, // Session Expiry = 3600
         0x00, 0x04, b's', b'e', b's', b'x', // Client ID
     ];
@@ -758,7 +764,7 @@ async fn test_mqtt_3_1_2_24_max_packet_size_respected() {
     // Property 0x27 (Maximum Packet Size) = 50 bytes
     let connect = [
         0x10, 0x14, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3C,
-        0x05,       // Properties length = 5
+        0x05, // Properties length = 5
         0x27, 0x00, 0x00, 0x00, 0x32, // Maximum Packet Size = 50
         0x00, 0x04, b'm', b'p', b's', b'c', // Client ID
     ];

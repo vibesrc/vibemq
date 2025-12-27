@@ -48,7 +48,7 @@ async fn test_mqtt_2_1_3_1_subscribe_invalid_flags() {
     let invalid_subscribe = [
         0x80, 0x0A, // SUBSCRIBE with wrong flags
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x04, b't', b'e', b's', b't', // Topic
         0x00, // QoS
     ];
@@ -76,7 +76,7 @@ async fn test_mqtt_2_1_3_1_unsubscribe_invalid_flags() {
     let invalid_unsubscribe = [
         0xA0, 0x09, // UNSUBSCRIBE with wrong flags
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x04, b't', b'e', b's', b't', // Topic
     ];
     client.send_raw(&invalid_unsubscribe).await;

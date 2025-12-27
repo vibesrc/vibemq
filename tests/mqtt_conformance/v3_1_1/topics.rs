@@ -168,7 +168,7 @@ async fn test_mqtt_4_7_0_1_topic_minimum_length() {
         0x82, 0x05, // SUBSCRIBE
         0x00, 0x01, // Packet ID
         0x00, 0x00, // Empty topic (0 length)
-        0x00,       // QoS
+        0x00, // QoS
     ];
     client.send_raw(&invalid_subscribe).await;
 
@@ -195,7 +195,7 @@ async fn test_mqtt_4_7_0_1_publish_empty_topic_closes() {
     let invalid_publish = [
         0x30, 0x03, // PUBLISH QoS 0
         0x00, 0x00, // Empty topic (0 length)
-        b'X',       // Payload
+        b'X', // Payload
     ];
     client.send_raw(&invalid_publish).await;
 
@@ -233,10 +233,7 @@ async fn test_mqtt_4_7_1_3_multilevel_preceded_by_separator() {
 
     if let Some(data) = client.recv_raw(1000).await {
         assert_eq!(data[0], 0x90, "Should receive SUBACK for # alone");
-        assert!(
-            data[4] <= 0x02,
-            "# alone should be valid [MQTT-4.7.1-3]"
-        );
+        assert!(data[4] <= 0x02, "# alone should be valid [MQTT-4.7.1-3]");
     } else {
         panic!("Should receive SUBACK for valid # subscription [MQTT-4.7.1-3]");
     }
@@ -252,10 +249,7 @@ async fn test_mqtt_4_7_1_3_multilevel_preceded_by_separator() {
 
     if let Some(data) = client.recv_raw(1000).await {
         assert_eq!(data[0], 0x90, "Should receive SUBACK for a/#");
-        assert!(
-            data[4] <= 0x02,
-            "a/# should be valid [MQTT-4.7.1-3]"
-        );
+        assert!(data[4] <= 0x02, "a/# should be valid [MQTT-4.7.1-3]");
     }
 
     broker_handle.abort();

@@ -372,10 +372,7 @@ async fn test_mqtt_3_3_1_1_dup_on_redelivery() {
     // Redelivery should have DUP=1 [MQTT-3.3.1-1]
     if let Some(data) = client.recv_raw(1000).await {
         let dup = (data[0] >> 3) & 0x01;
-        assert_eq!(
-            dup, 1,
-            "Re-delivery MUST have DUP=1 [MQTT-3.3.1-1]"
-        );
+        assert_eq!(dup, 1, "Re-delivery MUST have DUP=1 [MQTT-3.3.1-1]");
     }
 
     broker_handle.abort();
@@ -650,7 +647,7 @@ async fn test_mqtt_3_3_1_3_outgoing_dup_independent() {
         0x3A, 0x0C, // PUBLISH QoS 1, DUP=1
         0x00, 0x07, b'd', b'u', b'p', b't', b'e', b's', b't', // Topic
         0x00, 0x01, // Packet ID
-        b'X',       // Payload
+        b'X', // Payload
     ];
     publisher.send_raw(&publish_with_dup).await;
     let _ = publisher.recv_raw(1000).await; // PUBACK

@@ -5,7 +5,9 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient, CONNECT_V311, DISCONNECT};
+use crate::mqtt_conformance::{
+    next_port, start_broker, test_config, RawClient, CONNECT_V311, DISCONNECT,
+};
 
 // ============================================================================
 // [MQTT-3.2.0-1] First Packet From Server MUST Be CONNACK

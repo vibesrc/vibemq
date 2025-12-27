@@ -270,8 +270,7 @@ where
             subscription_ids: SmallVec<[u32; 4]>,
         }
 
-        let mut client_subs: AHashMap<Arc<str>, ClientSub> =
-            AHashMap::with_capacity(matches.len());
+        let mut client_subs: AHashMap<Arc<str>, ClientSub> = AHashMap::with_capacity(matches.len());
 
         for sub in matches {
             // Skip sender if no_local is set

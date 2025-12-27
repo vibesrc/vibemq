@@ -257,7 +257,8 @@ async fn test_mqtt_3_10_4_4_character_by_character_comparison() {
     let subscribe = [
         0x82, 0x0F, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x00, 0x0A, b't', b'e', b's', b't', b'/', b't', b'o', b'p', b'i', b'c', // "test/topic"
+        0x00, 0x0A, b't', b'e', b's', b't', b'/', b't', b'o', b'p', b'i',
+        b'c', // "test/topic"
         0x00, // QoS 0
     ];
     client.send_raw(&subscribe).await;
@@ -300,7 +301,9 @@ async fn test_mqtt_3_10_4_4_character_by_character_comparison() {
             "Should still receive PUBLISH after partial unsubscribe [MQTT-3.10.4-4]"
         );
     } else {
-        panic!("Subscription should still exist - character-by-character comparison [MQTT-3.10.4-4]");
+        panic!(
+            "Subscription should still exist - character-by-character comparison [MQTT-3.10.4-4]"
+        );
     }
 
     broker_handle.abort();
@@ -348,7 +351,10 @@ async fn test_mqtt_3_10_4_5_deleted_subscription_stops_messages() {
     publisher.send_raw(&publish1).await;
 
     if let Some(data) = client.recv_raw(500).await {
-        assert!(data[0] & 0xF0 == 0x30, "Should receive PUBLISH before unsubscribe");
+        assert!(
+            data[0] & 0xF0 == 0x30,
+            "Should receive PUBLISH before unsubscribe"
+        );
     } else {
         panic!("Should receive PUBLISH before unsubscribe");
     }

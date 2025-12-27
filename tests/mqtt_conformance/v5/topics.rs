@@ -24,7 +24,7 @@ async fn test_mqtt_4_7_0_1_topic_minimum_length_subscribe() {
     let invalid_subscribe = [
         0x82, 0x06, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x00, // Empty topic (0 length)
         0x00, // QoS
     ];
@@ -78,7 +78,7 @@ async fn test_mqtt_4_7_0_1_valid_single_char_topic() {
     let subscribe = [
         0x82, 0x07, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x01, b'x', // Topic "x" (1 char)
         0x00, // QoS
     ];

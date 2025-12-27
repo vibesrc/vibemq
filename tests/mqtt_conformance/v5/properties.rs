@@ -4,7 +4,7 @@
 
 use std::net::SocketAddr;
 
-use crate::mqtt_conformance::v5::{build_connect_v5, connect_v5, CONNECT_V5};
+use crate::mqtt_conformance::v5::{connect_v5, CONNECT_V5};
 use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient};
 
 // ============================================================================
@@ -49,7 +49,7 @@ async fn test_mqtt_2_2_2_1_publish_with_zero_properties() {
     let subscribe = [
         0x82, 0x0A, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x04, b't', b'e', b's', b't', // Topic
         0x00, // QoS 0
     ];
@@ -60,7 +60,7 @@ async fn test_mqtt_2_2_2_1_publish_with_zero_properties() {
     let publish = [
         0x30, 0x09, // PUBLISH QoS 0
         0x00, 0x04, b't', b'e', b's', b't', // Topic
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         b'h', b'i', // Payload
     ];
     client.send_raw(&publish).await;

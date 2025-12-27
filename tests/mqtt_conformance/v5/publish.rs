@@ -362,7 +362,7 @@ async fn test_mqtt_3_3_2_5_topic_alias_zero_invalid() {
     let invalid_publish = [
         0x30, 0x0B, // PUBLISH QoS 0
         0x00, 0x04, b't', b'e', b's', b't', // Topic
-        0x03,             // Properties length = 3
+        0x03, // Properties length = 3
         0x23, 0x00, 0x00, // Topic Alias = 0 (invalid)
     ];
     client.send_raw(&invalid_publish).await;
@@ -490,7 +490,7 @@ async fn test_mqtt_3_3_4_7_receive_maximum() {
     let connect = [
         0x10, 0x12, // CONNECT
         0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3C,
-        0x03,       // Properties length = 3
+        0x03, // Properties length = 3
         0x21, 0x00, 0x02, // Receive Maximum = 2
         0x00, 0x02, b'r', b'm', // Client ID
     ];

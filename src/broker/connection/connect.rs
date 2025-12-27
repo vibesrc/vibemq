@@ -491,7 +491,10 @@ where
                         .map_err(|e| ConnectionError::Protocol(e.into()))?;
 
                     if self.write_buf.len() <= max_packet_size as usize {
-                        trace!("Resending inflight PUBLISH packet_id={} with DUP=1", packet_id);
+                        trace!(
+                            "Resending inflight PUBLISH packet_id={} with DUP=1",
+                            packet_id
+                        );
                         self.stream.write_all(&self.write_buf).await?;
                     }
                 }

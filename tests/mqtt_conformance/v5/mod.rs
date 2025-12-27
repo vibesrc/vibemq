@@ -28,10 +28,10 @@ use crate::mqtt_conformance::RawClient;
 pub const CONNECT_V5: [u8; 16] = [
     0x10, 0x0E, // CONNECT, remaining = 14
     0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-    0x05,       // Protocol version 5
-    0x02,       // Connect flags: Clean Start = 1
+    0x05, // Protocol version 5
+    0x02, // Connect flags: Clean Start = 1
     0x00, 0x3C, // Keep alive = 60
-    0x00,       // Properties length = 0
+    0x00, // Properties length = 0
     0x00, 0x01, b'a', // Client ID = "a"
 ];
 
@@ -205,6 +205,7 @@ pub async fn connect_v5(client: &mut RawClient) -> Option<Vec<u8>> {
 }
 
 /// Helper to connect with custom client ID
+#[allow(dead_code)]
 pub async fn connect_v5_with_id(
     client: &mut RawClient,
     client_id: &str,
@@ -216,6 +217,7 @@ pub async fn connect_v5_with_id(
 }
 
 /// Extract reason code from CONNACK (v5)
+#[allow(dead_code)]
 pub fn connack_reason_code(data: &[u8]) -> Option<u8> {
     if data.len() >= 4 && data[0] == 0x20 {
         Some(data[3])
@@ -225,6 +227,7 @@ pub fn connack_reason_code(data: &[u8]) -> Option<u8> {
 }
 
 /// Extract session present flag from CONNACK
+#[allow(dead_code)]
 pub fn connack_session_present(data: &[u8]) -> Option<bool> {
     if data.len() >= 3 && data[0] == 0x20 {
         Some(data[2] != 0)

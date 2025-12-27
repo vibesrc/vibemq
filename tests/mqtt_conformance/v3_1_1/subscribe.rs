@@ -482,7 +482,7 @@ async fn test_mqtt_3_8_4_5_return_code_per_filter() {
         );
         // If all succeeded, the granted QoS should match or be lower than requested
         if rc1 != 0x80 {
-            assert!(rc1 <= 0x00, "QoS 0 requested, should grant 0");
+            assert_eq!(rc1, 0x00, "QoS 0 requested, should grant 0");
         }
         if rc2 != 0x80 {
             assert!(rc2 <= 0x01, "QoS 1 requested, should grant <= 1");

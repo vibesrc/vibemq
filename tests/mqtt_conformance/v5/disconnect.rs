@@ -4,7 +4,7 @@
 
 use std::net::SocketAddr;
 
-use crate::mqtt_conformance::v5::{build_connect_v5, connect_v5};
+use crate::mqtt_conformance::v5::connect_v5;
 use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient};
 
 // ============================================================================
@@ -25,8 +25,8 @@ async fn test_mqtt_3_14_2_1_session_expiry_change() {
     // DISCONNECT with Session Expiry > 0 (invalid change) [MQTT-3.14.2-1]
     let disconnect = [
         0xE0, 0x07, // DISCONNECT
-        0x00,             // Reason Code = 0 (Normal)
-        0x05,             // Properties length = 5
+        0x00, // Reason Code = 0 (Normal)
+        0x05, // Properties length = 5
         0x11, 0x00, 0x00, 0x0E, 0x10, // Session Expiry = 3600 (change from 0)
     ];
     client.send_raw(&disconnect).await;
@@ -50,7 +50,7 @@ async fn test_mqtt_3_14_2_1_session_expiry_valid_change() {
     let connect = [
         0x10, 0x14, // CONNECT
         0x00, 0x04, b'M', b'Q', b'T', b'T', 0x05, 0x02, 0x00, 0x3C,
-        0x05,       // Properties length = 5
+        0x05, // Properties length = 5
         0x11, 0x00, 0x00, 0x0E, 0x10, // Session Expiry = 3600
         0x00, 0x04, b's', b'e', b'x', b'v', // Client ID
     ];
@@ -60,8 +60,8 @@ async fn test_mqtt_3_14_2_1_session_expiry_valid_change() {
     // DISCONNECT with different Session Expiry (valid - can change from non-zero)
     let disconnect = [
         0xE0, 0x07, // DISCONNECT
-        0x00,             // Reason Code = 0
-        0x05,             // Properties length = 5
+        0x00, // Reason Code = 0
+        0x05, // Properties length = 5
         0x11, 0x00, 0x00, 0x07, 0x08, // Session Expiry = 1800
     ];
     client.send_raw(&disconnect).await;

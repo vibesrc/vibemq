@@ -109,8 +109,7 @@ async fn test_mqtt_3_2_2_4_nonzero_reason_session_present_zero() {
 
     // Send invalid protocol version to trigger non-zero reason code
     let invalid_connect = [
-        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T',
-        99,   // Invalid protocol version
+        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T', 99, // Invalid protocol version
         0x02, 0x00, 0x3C, 0x00, 0x00, 0x01, b'a',
     ];
     client.send_raw(&invalid_connect).await;
@@ -142,8 +141,7 @@ async fn test_mqtt_3_2_2_5_nonzero_reason_closes() {
 
     // Invalid protocol version to trigger error
     let invalid_connect = [
-        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T',
-        99,   // Invalid protocol version
+        0x10, 0x0F, 0x00, 0x04, b'M', b'Q', b'T', b'T', 99, // Invalid protocol version
         0x02, 0x00, 0x3C, 0x00, 0x00, 0x01, b'a',
     ];
     client.send_raw(&invalid_connect).await;
@@ -169,7 +167,7 @@ async fn test_mqtt_3_2_2_5_nonzero_reason_closes() {
 #[tokio::test]
 async fn test_mqtt_3_2_2_15_server_max_packet_size() {
     let port = next_port();
-    let mut config = test_config(port);
+    let config = test_config(port);
     // Set small max packet size on server (already set to 1024 in test_config)
     let broker_handle = start_broker(config).await;
 

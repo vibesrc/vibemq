@@ -390,7 +390,8 @@ async fn test_mqtt_3_1_2_11_will_flag_zero_qos_must_be_zero() {
     // CONNECT with Will Flag=0 but Will QoS=1 (INVALID)
     // Connect flags: 0x0A = 0000 1010 = Will QoS=1 but Will Flag=0
     let invalid_connect = [
-        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x0A, // Invalid: Will QoS with no Will
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
+        0x0A, // Invalid: Will QoS with no Will
         0x00, 0x3C, 0x00, 0x01, b'a',
     ];
     client.send_raw(&invalid_connect).await;
@@ -415,7 +416,8 @@ async fn test_mqtt_3_1_2_15_will_flag_zero_retain_must_be_zero() {
     // CONNECT with Will Flag=0 but Will Retain=1 (INVALID)
     // Connect flags: 0x22 = 0010 0010 = Will Retain=1, Clean Session=1, but no Will Flag
     let invalid_connect = [
-        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x22, // Invalid: Will Retain without Will Flag
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
+        0x22, // Invalid: Will Retain without Will Flag
         0x00, 0x3C, 0x00, 0x01, b'a',
     ];
     client.send_raw(&invalid_connect).await;
@@ -611,7 +613,8 @@ async fn test_mqtt_3_1_2_22_username_zero_password_must_be_zero() {
     // CONNECT with Username Flag=0 but Password Flag=1 (INVALID)
     // Connect flags: 0x42 = 0100 0010 = Password Flag + Clean Session (no Username Flag)
     let invalid_connect = [
-        0x10, 0x11, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x42, // Password without Username
+        0x10, 0x11, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
+        0x42, // Password without Username
         0x00, 0x3C, 0x00, 0x01, b'a', // Client ID
         0x00, 0x04, b'p', b'a', b's', b's', // Password (invalid)
     ];
@@ -641,7 +644,8 @@ async fn test_mqtt_3_1_3_5_valid_client_id_alphanumeric() {
     // CONNECT with 23-byte alphanumeric client ID
     let connect = [
         0x10, 0x23, // Remaining length = 35
-        0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x17, // Client ID length = 23
+        0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00,
+        0x17, // Client ID length = 23
         b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', b'l', b'm', b'n', b'o',
         b'p', b'q', b'r', b's', b't', b'u', b'v', b'w',
     ];
@@ -811,8 +815,8 @@ async fn test_mqtt_3_1_2_18_username_flag_zero_no_username_accepted() {
     let valid_connect = [
         0x10, 0x0D, // CONNECT, remaining = 13
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0x02,       // Flags: CleanSession=1, Username=0, Password=0
+        0x04, // Protocol level
+        0x02, // Flags: CleanSession=1, Username=0, Password=0
         0x00, 0x3C, // Keep alive
         0x00, 0x01, b'u', // Client ID = "u"
     ];
@@ -849,8 +853,8 @@ async fn test_mqtt_3_1_2_19_username_flag_one_username_missing_closes() {
     let invalid_connect = [
         0x10, 0x0D, // CONNECT, remaining = 13
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0x82,       // Flags: CleanSession=1, Username=1
+        0x04, // Protocol level
+        0x82, // Flags: CleanSession=1, Username=1
         0x00, 0x3C, // Keep alive
         0x00, 0x01, b'm', // Client ID = "m" (no username follows)
     ];
@@ -878,8 +882,8 @@ async fn test_mqtt_3_1_2_19_username_flag_one_with_username_accepted() {
     let valid_connect = [
         0x10, 0x13, // CONNECT, remaining = 19
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0x82,       // Flags: CleanSession=1, Username=1
+        0x04, // Protocol level
+        0x82, // Flags: CleanSession=1, Username=1
         0x00, 0x3C, // Keep alive
         0x00, 0x01, b'n', // Client ID = "n"
         0x00, 0x04, b'u', b's', b'e', b'r', // Username = "user"
@@ -922,8 +926,8 @@ async fn test_mqtt_3_1_2_20_password_flag_zero_password_present_closes() {
     let valid_connect = [
         0x10, 0x13, // CONNECT, remaining = 19 (valid packet without password)
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0x82,       // Flags: CleanSession=1, Username=1, Password=0
+        0x04, // Protocol level
+        0x82, // Flags: CleanSession=1, Username=1, Password=0
         0x00, 0x3C, // Keep alive
         0x00, 0x01, b'p', // Client ID = "p"
         0x00, 0x04, b'u', b's', b'e', b'r', // Username = "user"
@@ -958,8 +962,8 @@ async fn test_mqtt_3_1_2_21_password_flag_one_password_missing_closes() {
     let invalid_connect = [
         0x10, 0x13, // CONNECT, remaining = 19
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0xC2,       // Flags: CleanSession=1, Username=1, Password=1
+        0x04, // Protocol level
+        0xC2, // Flags: CleanSession=1, Username=1, Password=1
         0x00, 0x3C, // Keep alive
         0x00, 0x01, b'q', // Client ID = "q"
         0x00, 0x04, b'u', b's', b'e', b'r', // Username = "user" (no password follows)
@@ -988,8 +992,8 @@ async fn test_mqtt_3_1_2_21_password_flag_one_with_password_accepted() {
     let valid_connect = [
         0x10, 0x19, // CONNECT, remaining = 25
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0xC2,       // Flags: CleanSession=1, Username=1, Password=1
+        0x04, // Protocol level
+        0xC2, // Flags: CleanSession=1, Username=1, Password=1
         0x00, 0x3C, // Keep alive
         0x00, 0x01, b'r', // Client ID = "r"
         0x00, 0x04, b'u', b's', b'e', b'r', // Username = "user"
@@ -1028,8 +1032,8 @@ async fn test_mqtt_3_1_3_11_username_invalid_utf8_closes() {
     let invalid_connect = [
         0x10, 0x10, // CONNECT, remaining = 16
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0x82,       // Flags: CleanSession=1, Username=1
+        0x04, // Protocol level
+        0x82, // Flags: CleanSession=1, Username=1
         0x00, 0x3C, // Keep alive
         0x00, 0x01, b's', // Client ID = "s"
         0x00, 0x01, 0xFF, // Username with invalid UTF-8
@@ -1061,8 +1065,8 @@ async fn test_mqtt_3_1_3_10_will_topic_invalid_utf8_closes() {
     let invalid_connect = [
         0x10, 0x14, // CONNECT, remaining = 20
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0x06,       // Flags: CleanSession=1, Will=1
+        0x04, // Protocol level
+        0x06, // Flags: CleanSession=1, Will=1
         0x00, 0x3C, // Keep alive
         0x00, 0x01, b't', // Client ID = "t"
         0x00, 0x01, 0xFF, // Will topic with invalid UTF-8
@@ -1096,8 +1100,8 @@ async fn test_mqtt_3_1_2_9_will_flag_one_missing_will_topic_closes() {
     let invalid_connect = [
         0x10, 0x0D, // CONNECT, remaining = 13
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0x06,       // Flags: CleanSession=1, Will=1
+        0x04, // Protocol level
+        0x06, // Flags: CleanSession=1, Will=1
         0x00, 0x3C, // Keep alive
         0x00, 0x01, b'w', // Client ID only, no will topic/message
     ];
@@ -1142,9 +1146,8 @@ async fn test_mqtt_3_1_2_10_will_removed_after_disconnect() {
     // Will topic = "willrmv", will message = "bye"
     let connect_with_will = [
         0x10, 0x1C, // CONNECT
-        0x00, 0x04, b'M', b'Q', b'T', b'T',
-        0x04,       // Protocol level
-        0x06,       // Flags: CleanSession=1, Will=1
+        0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, // Protocol level
+        0x06, // Flags: CleanSession=1, Will=1
         0x00, 0x3C, // Keep alive
         0x00, 0x03, b'w', b'l', b'c', // Client ID
         0x00, 0x07, b'w', b'i', b'l', b'l', b'r', b'm', b'v', // Will topic
@@ -1200,9 +1203,8 @@ async fn test_mqtt_3_1_2_12_will_flag_zero_no_will_published() {
     let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
     let connect_no_will = [
         0x10, 0x0E, // CONNECT
-        0x00, 0x04, b'M', b'Q', b'T', b'T',
-        0x04,       // Protocol level
-        0x02,       // Flags: CleanSession=1, Will=0
+        0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, // Protocol level
+        0x02, // Flags: CleanSession=1, Will=0
         0x00, 0x3C, // Keep alive
         0x00, 0x02, b'n', b'w', // Client ID "nw"
     ];
@@ -1240,9 +1242,8 @@ async fn test_mqtt_3_1_3_4_client_id_invalid_utf8_closes() {
     // CONNECT with invalid UTF-8 in client ID (0xFF is not valid UTF-8)
     let invalid_connect = [
         0x10, 0x0D, // CONNECT
-        0x00, 0x04, b'M', b'Q', b'T', b'T',
-        0x04,       // Protocol level
-        0x02,       // Flags: CleanSession=1
+        0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, // Protocol level
+        0x02, // Flags: CleanSession=1
         0x00, 0x3C, // Keep alive
         0x00, 0x01, 0xFF, // Client ID with invalid UTF-8
     ];
@@ -1271,9 +1272,8 @@ async fn test_mqtt_3_1_4_3_clean_session_processing() {
     let mut client1 = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
     let connect_cs0 = [
         0x10, 0x10, // CONNECT
-        0x00, 0x04, b'M', b'Q', b'T', b'T',
-        0x04,       // Protocol level
-        0x00,       // Flags: CleanSession=0
+        0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, // Protocol level
+        0x00, // Flags: CleanSession=0
         0x00, 0x3C, // Keep alive
         0x00, 0x04, b'c', b's', b'p', b'r', // Client ID "cspr"
     ];
@@ -1298,9 +1298,8 @@ async fn test_mqtt_3_1_4_3_clean_session_processing() {
     let mut client2 = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
     let connect_cs1 = [
         0x10, 0x10, // CONNECT
-        0x00, 0x04, b'M', b'Q', b'T', b'T',
-        0x04,       // Protocol level
-        0x02,       // Flags: CleanSession=1
+        0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, // Protocol level
+        0x02, // Flags: CleanSession=1
         0x00, 0x3C, // Keep alive
         0x00, 0x04, b'c', b's', b'p', b'r', // Same Client ID
     ];

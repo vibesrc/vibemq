@@ -5,7 +5,9 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use crate::mqtt_conformance::v5::{build_connect_v5, build_publish_v5, build_subscribe_v5, connect_v5};
+use crate::mqtt_conformance::v5::{
+    build_connect_v5, build_publish_v5, build_subscribe_v5, connect_v5,
+};
 use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient};
 
 // ============================================================================
@@ -141,8 +143,15 @@ async fn test_mqtt_4_6_0_6_ordered_qos1() {
     let _ = publisher.recv_raw(1000).await;
 
     for i in 1u8..=3 {
-        let publish =
-            build_publish_v5("ordered/q1", &[b'A' + i - 1], 1, false, false, Some(i as u16), &[]);
+        let publish = build_publish_v5(
+            "ordered/q1",
+            &[b'A' + i - 1],
+            1,
+            false,
+            false,
+            Some(i as u16),
+            &[],
+        );
         if publisher.try_send_raw(&publish).await.is_err() {
             break;
         }

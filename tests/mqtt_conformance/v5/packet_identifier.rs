@@ -5,7 +5,9 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use crate::mqtt_conformance::v5::{build_connect_v5, build_publish_v5, build_subscribe_v5, connect_v5};
+use crate::mqtt_conformance::v5::{
+    build_connect_v5, build_publish_v5, build_subscribe_v5, connect_v5,
+};
 use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient};
 
 // ============================================================================
@@ -249,7 +251,7 @@ async fn test_mqtt_2_2_1_6_unsuback_matching_packet_id() {
     let unsubscribe = [
         0xA2, 0x09, // UNSUBSCRIBE
         0x56, 0x78, // Packet ID = 0x5678
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x04, b't', b'e', b's', b't', // Topic
     ];
     client.send_raw(&unsubscribe).await;

@@ -113,13 +113,16 @@ async fn test_mqtt_4_3_2_1_qos1_deliver_at_least_once() {
         0x32, 0x0A, // QoS 1
         0x00, 0x05, b'q', b'o', b's', b'/', b'1', // Topic
         0x00, 0x01, // Packet ID
-        b'Y',       // Payload
+        b'Y', // Payload
     ];
     publisher.send_raw(&publish).await;
 
     // Publisher should receive PUBACK
     if let Some(data) = publisher.recv_raw(1000).await {
-        assert_eq!(data[0], 0x40, "Publisher should receive PUBACK [MQTT-4.3.2-1]");
+        assert_eq!(
+            data[0], 0x40,
+            "Publisher should receive PUBACK [MQTT-4.3.2-1]"
+        );
     } else {
         panic!("Publisher should receive PUBACK [MQTT-4.3.2-1]");
     }
@@ -163,7 +166,7 @@ async fn test_mqtt_4_3_2_2_qos1_store_until_puback() {
         0x32, 0x09, // QoS 1
         0x00, 0x04, b's', b't', b'o', b'r', // Topic
         0x00, 0x02, // Packet ID
-        b'Z',       // Payload
+        b'Z', // Payload
     ];
     client.send_raw(&publish).await;
 
@@ -222,7 +225,7 @@ async fn test_mqtt_4_3_3_1_qos2_deliver_exactly_once() {
         0x34, 0x0A, // QoS 2
         0x00, 0x05, b'q', b'o', b's', b'/', b'2', // Topic
         0x00, 0x01, // Packet ID
-        b'W',       // Payload
+        b'W', // Payload
     ];
     publisher.send_raw(&publish).await;
 
@@ -272,7 +275,7 @@ async fn test_mqtt_4_3_3_2_qos2_store_until_pubrec() {
         0x34, 0x09, // QoS 2
         0x00, 0x04, b'q', b'o', b's', b'2', // Topic
         0x00, 0x01, // Packet ID
-        b'A',       // Payload
+        b'A', // Payload
     ];
     client.send_raw(&publish).await;
 
@@ -308,7 +311,7 @@ async fn test_mqtt_4_3_3_3_pubrel_after_pubrec() {
         0x34, 0x09, // QoS 2
         0x00, 0x04, b'p', b'r', b'e', b'l', // Topic
         0x00, 0x05, // Packet ID
-        b'B',       // Payload
+        b'B', // Payload
     ];
     client.send_raw(&publish).await;
 
@@ -375,7 +378,7 @@ async fn test_mqtt_4_3_3_4_store_packet_id_until_pubrel() {
         0x34, 0x09, // QoS 2
         0x00, 0x04, b's', b't', b'i', b'd', // Topic
         0x00, 0x09, // Packet ID
-        b'C',       // Payload
+        b'C', // Payload
     ];
     publisher.send_raw(&publish).await;
 
@@ -573,8 +576,8 @@ async fn test_mqtt_4_4_0_1_reconnect_resends_unacked_publish() {
     let connect = [
         0x10, 0x11, // CONNECT, remaining = 17
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x04,       // Protocol level
-        0x00,       // Flags: CleanSession=0
+        0x04, // Protocol level
+        0x00, // Flags: CleanSession=0
         0x00, 0x3C, // Keep alive = 60
         0x00, 0x05, b'r', b'e', b'c', b'o', b'n', // Client ID = "recon"
     ];
@@ -607,7 +610,7 @@ async fn test_mqtt_4_4_0_1_reconnect_resends_unacked_publish() {
         0x32, 0x0D, // PUBLISH QoS 1
         0x00, 0x08, b'r', b'e', b'c', b'o', b'n', b'/', b'q', b'1', // Topic
         0x00, 0x01, // Packet ID
-        b'X',       // Payload
+        b'X', // Payload
     ];
     publisher.send_raw(&publish).await;
     let _ = publisher.recv_raw(1000).await; // PUBACK from broker
@@ -670,9 +673,8 @@ async fn test_mqtt_4_4_0_1_reconnect_resends_pubrel() {
     // CleanSession=0, client ID "reco2"
     let connect = [
         0x10, 0x11, // CONNECT
-        0x00, 0x04, b'M', b'Q', b'T', b'T',
-        0x04,       // Protocol level
-        0x00,       // Flags: CleanSession=0
+        0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, // Protocol level
+        0x00, // Flags: CleanSession=0
         0x00, 0x3C, // Keep alive
         0x00, 0x05, b'r', b'e', b'c', b'o', b'2', // Client ID
     ];
@@ -684,7 +686,7 @@ async fn test_mqtt_4_4_0_1_reconnect_resends_pubrel() {
         0x34, 0x09, // PUBLISH QoS 2
         0x00, 0x04, b'q', b'2', b'r', b'l', // Topic "q2rl"
         0x00, 0x07, // Packet ID = 7
-        b'Y',       // Payload
+        b'Y', // Payload
     ];
     client.send_raw(&publish).await;
 

@@ -106,9 +106,7 @@ async fn test_mqtt_1_5_3_3_bom_not_stripped() {
 
     // Publish to topic WITHOUT BOM - should NOT be received by subscriber
     // Topic = "test" (4 bytes)
-    let publish_no_bom = [
-        0x30, 0x09, 0x00, 0x04, b't', b'e', b's', b't', b'h', b'i',
-    ];
+    let publish_no_bom = [0x30, 0x09, 0x00, 0x04, b't', b'e', b's', b't', b'h', b'i'];
     publisher.send_raw(&publish_no_bom).await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;

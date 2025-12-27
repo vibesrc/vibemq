@@ -5,7 +5,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use crate::mqtt_conformance::v5::{build_connect_v5, build_publish_v5, connect_v5};
+use crate::mqtt_conformance::v5::{build_connect_v5, build_publish_v5};
 use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient};
 
 // ============================================================================
@@ -28,7 +28,7 @@ async fn test_mqtt_4_8_2_1_shared_subscription_one_delivery() {
     let subscribe1 = [
         0x82, 0x17, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x12, b'$', b's', b'h', b'a', b'r', b'e', b'/', b'g', b'r', b'o', b'u', b'p', b'/',
         b't', b'o', b'p', b'i', b'c', // Topic
         0x00, // QoS 0
@@ -136,17 +136,17 @@ async fn test_mqtt_4_8_2_2_shared_subscription_load_balancing() {
 
     // Count messages received by each subscriber
     // Note: Shared subscription support is implementation-dependent
-    let mut count1 = 0;
-    let mut count2 = 0;
+    let mut _count1 = 0;
+    let mut _count2 = 0;
 
     for _ in 0..4 {
-        if let Some(_) = sub1.recv_raw(100).await {
-            count1 += 1;
+        if sub1.recv_raw(100).await.is_some() {
+            _count1 += 1;
         }
     }
     for _ in 0..4 {
-        if let Some(_) = sub2.recv_raw(100).await {
-            count2 += 1;
+        if sub2.recv_raw(100).await.is_some() {
+            _count2 += 1;
         }
     }
 

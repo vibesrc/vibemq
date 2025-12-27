@@ -5,7 +5,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use crate::mqtt_conformance::v5::{build_connect_v5, connect_v5, CONNECT_V5};
+use crate::mqtt_conformance::v5::{build_connect_v5, connect_v5};
 use crate::mqtt_conformance::{next_port, start_broker, test_config, RawClient};
 
 // ============================================================================
@@ -24,10 +24,10 @@ async fn test_mqtt_1_5_4_1_invalid_utf8_closes_connection() {
     let invalid_connect = [
         0x10, 0x10, // CONNECT
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x05,       // Protocol version 5
-        0x02,       // Clean Start
+        0x05, // Protocol version 5
+        0x02, // Clean Start
         0x00, 0x3C, // Keep alive
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x02, 0xFF, 0xFE, // Invalid UTF-8 client ID
     ];
     client.send_raw(&invalid_connect).await;
@@ -37,7 +37,10 @@ async fn test_mqtt_1_5_4_1_invalid_utf8_closes_connection() {
     if let Some(data) = client.recv_raw(1000).await {
         if data[0] == 0x20 && data.len() >= 4 {
             // CONNACK with error code is acceptable
-            assert!(data[3] >= 0x80, "Should reject invalid UTF-8 [MQTT-1.5.4-1]");
+            assert!(
+                data[3] >= 0x80,
+                "Should reject invalid UTF-8 [MQTT-1.5.4-1]"
+            );
         }
     }
     // Connection close is also acceptable
@@ -94,7 +97,7 @@ async fn test_mqtt_1_5_4_3_bom_not_stripped() {
     let subscribe_with_bom = [
         0x82, 0x0D, // SUBSCRIBE
         0x00, 0x01, // Packet ID
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         0x00, 0x07, 0xEF, 0xBB, 0xBF, b't', b'e', b's', b't', // Topic with BOM
         0x00, // QoS 0
     ];
@@ -111,7 +114,7 @@ async fn test_mqtt_1_5_4_3_bom_not_stripped() {
     let publish_no_bom = [
         0x30, 0x09, // PUBLISH QoS 0
         0x00, 0x04, b't', b'e', b's', b't', // Topic without BOM
-        0x00,       // Properties length = 0
+        0x00, // Properties length = 0
         b'h', b'i', // Payload
     ];
     publisher.send_raw(&publish_no_bom).await;
@@ -182,11 +185,11 @@ async fn test_mqtt_1_5_7_1_string_pair_valid_utf8() {
     let invalid_connect = [
         0x10, 0x18, // CONNECT
         0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol name
-        0x05,       // Protocol version 5
-        0x02,       // Clean Start
+        0x05, // Protocol version 5
+        0x02, // Clean Start
         0x00, 0x3C, // Keep alive
-        0x09,       // Properties length = 9
-        0x26,       // User Property
+        0x09, // Properties length = 9
+        0x26, // User Property
         0x00, 0x02, 0xFF, 0xFE, // Invalid UTF-8 key
         0x00, 0x02, b'o', b'k', // Valid value
         0x00, 0x01, b'a', // Client ID
@@ -198,7 +201,10 @@ async fn test_mqtt_1_5_7_1_string_pair_valid_utf8() {
     if let Some(data) = client.recv_raw(1000).await {
         if data[0] == 0x20 && data.len() >= 4 {
             // CONNACK with error is acceptable
-            assert!(data[3] >= 0x80, "Should reject invalid UTF-8 [MQTT-1.5.7-1]");
+            assert!(
+                data[3] >= 0x80,
+                "Should reject invalid UTF-8 [MQTT-1.5.7-1]"
+            );
         }
     }
 
