@@ -5,11 +5,13 @@ use std::time::Instant;
 
 use parking_lot::RwLock;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use super::{BytesMutExt, Connection, ConnectionError, State};
 use crate::broker::BrokerEvent;
-use crate::protocol::{ConnAck, Disconnect, Packet, Properties, ProtocolVersion, QoS, ReasonCode};
+use crate::protocol::{
+    ConnAck, Disconnect, Packet, Properties, ProtocolVersion, PubRel, QoS, ReasonCode,
+};
 use crate::session::{
     InflightMessage, Qos2State, QueueResult, Session, SessionLimits, WillMessage,
 };
@@ -363,8 +365,11 @@ where
         // Send pending messages
         self.send_pending_messages(&session).await?;
 
-        // Send retained messages for existing subscriptions
+        // Re-send unacknowledged inflight messages on session resume [MQTT-4.4.0-1]
         if session_present {
+            self.resend_inflight_messages(&session).await?;
+
+            // Send retained messages for existing subscriptions
             self.send_retained_for_existing_subscriptions(&client_id, &session)
                 .await?;
         }
@@ -442,6 +447,65 @@ where
             self.stream.write_all(&self.write_buf).await?;
             if let Some(ref metrics) = self.metrics {
                 metrics.publish_sent(bytes_sent);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Re-send unacknowledged inflight messages on session resume
+    ///
+    /// Per [MQTT-4.4.0-1]: When a Client reconnects with CleanSession set to 0,
+    /// both Client and Server MUST re-send any unacknowledged PUBLISH packets
+    /// (where QoS > 0) and PUBREL packets using their original Packet Identifiers.
+    async fn resend_inflight_messages(
+        &mut self,
+        session: &Arc<RwLock<Session>>,
+    ) -> Result<(), ConnectionError> {
+        let (to_resend, max_packet_size) = {
+            let mut s = session.write();
+            let now = Instant::now();
+            let messages: Vec<_> = s
+                .inflight_outgoing
+                .iter_mut()
+                .map(|(packet_id, inflight)| {
+                    // Update sent_at for retry tracking
+                    inflight.sent_at = now;
+                    inflight.retry_count += 1;
+                    (*packet_id, inflight.publish.clone(), inflight.qos2_state)
+                })
+                .collect();
+            (messages, s.max_packet_size)
+        };
+
+        for (packet_id, mut publish, qos2_state) in to_resend {
+            match qos2_state {
+                None | Some(Qos2State::WaitingPubRec) => {
+                    // QoS 1, or QoS 2 waiting for PUBREC: resend PUBLISH with DUP=1 [MQTT-3.3.1-1]
+                    publish.dup = true;
+                    publish.packet_id = Some(packet_id);
+
+                    self.write_buf.clear();
+                    self.encoder
+                        .encode(&Packet::Publish(publish), &mut self.write_buf)
+                        .map_err(|e| ConnectionError::Protocol(e.into()))?;
+
+                    if self.write_buf.len() <= max_packet_size as usize {
+                        trace!("Resending inflight PUBLISH packet_id={} with DUP=1", packet_id);
+                        self.stream.write_all(&self.write_buf).await?;
+                    }
+                }
+                Some(Qos2State::WaitingPubComp) => {
+                    // QoS 2 waiting for PUBCOMP: resend PUBREL
+                    let pubrel = PubRel::new(packet_id);
+                    self.write_buf.clear();
+                    self.encoder
+                        .encode(&Packet::PubRel(pubrel), &mut self.write_buf)
+                        .map_err(|e| ConnectionError::Protocol(e.into()))?;
+
+                    trace!("Resending inflight PUBREL packet_id={}", packet_id);
+                    self.stream.write_all(&self.write_buf).await?;
+                }
             }
         }
 
