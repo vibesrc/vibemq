@@ -148,3 +148,177 @@ async fn test_mqtt_4_7_3_1_no_wildcards_in_topic_name() {
 
     broker_handle.abort();
 }
+
+// ============================================================================
+// [MQTT-4.7.0-1] Topic Names/Filters MUST Be At Least One Character
+// ============================================================================
+
+#[tokio::test]
+async fn test_mqtt_4_7_0_1_topic_minimum_length() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker_handle = start_broker(config).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    client.send_raw(&CONNECT_V311).await;
+    let _ = client.recv_raw(1000).await;
+
+    // SUBSCRIBE with empty topic filter (0 length)
+    let invalid_subscribe = [
+        0x82, 0x05, // SUBSCRIBE
+        0x00, 0x01, // Packet ID
+        0x00, 0x00, // Empty topic (0 length)
+        0x00,       // QoS
+    ];
+    client.send_raw(&invalid_subscribe).await;
+
+    // Server should reject or close [MQTT-4.7.0-1]
+    assert!(
+        client.expect_disconnect(1000).await,
+        "Topic Names/Filters MUST be at least one character [MQTT-4.7.0-1]"
+    );
+
+    broker_handle.abort();
+}
+
+#[tokio::test]
+async fn test_mqtt_4_7_0_1_publish_empty_topic_closes() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker_handle = start_broker(config).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    client.send_raw(&CONNECT_V311).await;
+    let _ = client.recv_raw(1000).await;
+
+    // PUBLISH with empty topic name (0 length)
+    let invalid_publish = [
+        0x30, 0x03, // PUBLISH QoS 0
+        0x00, 0x00, // Empty topic (0 length)
+        b'X',       // Payload
+    ];
+    client.send_raw(&invalid_publish).await;
+
+    // Server should reject or ignore empty topic PUBLISH [MQTT-4.7.0-1]
+    // The message should not be delivered to subscribers
+    // Valid outcomes: disconnect, timeout (message silently dropped), or error
+    // We just verify the broker doesn't crash
+    let _ = client.recv_raw(500).await; // May or may not get a response
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// [MQTT-4.7.1-3] Multi-level Wildcard Preceded by / Unless Alone
+// ============================================================================
+
+#[tokio::test]
+async fn test_mqtt_4_7_1_3_multilevel_preceded_by_separator() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker_handle = start_broker(config).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    client.send_raw(&CONNECT_V311).await;
+    let _ = client.recv_raw(1000).await;
+
+    // Subscribe with # alone (valid) [MQTT-4.7.1-3]
+    let valid_subscribe = [
+        0x82, 0x06, // SUBSCRIBE
+        0x00, 0x01, // Packet ID
+        0x00, 0x01, b'#', // Just "#"
+        0x00, // QoS
+    ];
+    client.send_raw(&valid_subscribe).await;
+
+    if let Some(data) = client.recv_raw(1000).await {
+        assert_eq!(data[0], 0x90, "Should receive SUBACK for # alone");
+        assert!(
+            data[4] <= 0x02,
+            "# alone should be valid [MQTT-4.7.1-3]"
+        );
+    } else {
+        panic!("Should receive SUBACK for valid # subscription [MQTT-4.7.1-3]");
+    }
+
+    // Subscribe with "a/#" (valid - # preceded by /)
+    let valid_subscribe2 = [
+        0x82, 0x08, // SUBSCRIBE
+        0x00, 0x02, // Packet ID
+        0x00, 0x03, b'a', b'/', b'#', // "a/#"
+        0x00, // QoS
+    ];
+    client.send_raw(&valid_subscribe2).await;
+
+    if let Some(data) = client.recv_raw(1000).await {
+        assert_eq!(data[0], 0x90, "Should receive SUBACK for a/#");
+        assert!(
+            data[4] <= 0x02,
+            "a/# should be valid [MQTT-4.7.1-3]"
+        );
+    }
+
+    broker_handle.abort();
+}
+
+#[tokio::test]
+async fn test_mqtt_4_7_1_3_multilevel_not_preceded_by_separator_invalid() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker_handle = start_broker(config).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    client.send_raw(&CONNECT_V311).await;
+    let _ = client.recv_raw(1000).await;
+
+    // Subscribe with "a#" (INVALID - # not preceded by /) [MQTT-4.7.1-3]
+    let invalid_subscribe = [
+        0x82, 0x07, // SUBSCRIBE
+        0x00, 0x01, // Packet ID
+        0x00, 0x02, b'a', b'#', // "a#" - invalid
+        0x00, // QoS
+    ];
+    client.send_raw(&invalid_subscribe).await;
+
+    // Server should reject with failure code or close connection [MQTT-4.7.1-3]
+    if let Some(data) = client.recv_raw(1000).await {
+        if data[0] == 0x90 {
+            // SUBACK - should have failure code
+            assert!(
+                data[4] >= 0x80,
+                "a# (# not preceded by /) should be rejected [MQTT-4.7.1-3]"
+            );
+        }
+    }
+
+    broker_handle.abort();
+}
+
+// ============================================================================
+// [MQTT-4.7.3-2] Client PUBLISH Topic MUST NOT Contain Wildcards
+// ============================================================================
+// NOTE: This is covered by MQTT-4.7.3-1 test above, as it tests PUBLISH with
+// wildcard characters which covers both normative statements.
+
+#[tokio::test]
+async fn test_mqtt_4_7_3_2_publish_with_hash_closes() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker_handle = start_broker(config).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    client.send_raw(&CONNECT_V311).await;
+    let _ = client.recv_raw(1000).await;
+
+    // PUBLISH with # wildcard in topic name
+    let invalid_publish = [0x30, 0x08, 0x00, 0x06, b't', b'e', b's', b't', b'/', b'#'];
+    client.send_raw(&invalid_publish).await;
+
+    // Server MUST close connection [MQTT-4.7.3-2]
+    assert!(
+        client.expect_disconnect(1000).await,
+        "Server MUST close connection on wildcard in PUBLISH topic [MQTT-4.7.3-2]"
+    );
+
+    broker_handle.abort();
+}

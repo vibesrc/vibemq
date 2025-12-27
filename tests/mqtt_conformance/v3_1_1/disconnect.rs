@@ -58,3 +58,37 @@ async fn test_mqtt_3_14_4_2_will_discarded_on_normal_disconnect() {
 
     broker_handle.abort();
 }
+
+// ============================================================================
+// [MQTT-3.14.4-1] After DISCONNECT Client Closes Connection
+// ============================================================================
+// NOTE: MQTT-3.14.4-1 is about client behavior ("Client MUST close the Network Connection
+// and MUST NOT send any more Control Packets"). We test server-side handling.
+
+#[tokio::test]
+async fn test_mqtt_3_14_4_1_disconnect_closes_connection() {
+    let port = next_port();
+    let config = test_config(port);
+    let broker_handle = start_broker(config).await;
+
+    let mut client = RawClient::connect(SocketAddr::from(([127, 0, 0, 1], port))).await;
+    let connect = [
+        0x10, 0x0D, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x01, b'd',
+    ];
+    client.send_raw(&connect).await;
+    let _ = client.recv_raw(1000).await;
+
+    // Send DISCONNECT
+    client.send_raw(&DISCONNECT).await;
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // The connection should be closed after DISCONNECT
+    // Any subsequent data should fail or return nothing
+    assert!(
+        client.expect_disconnect(1000).await,
+        "Connection should close after DISCONNECT [MQTT-3.14.4-1]"
+    );
+
+    broker_handle.abort();
+}

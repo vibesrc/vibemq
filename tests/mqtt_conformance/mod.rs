@@ -86,6 +86,11 @@ impl RawClient {
         self.stream.write_all(data).await.expect("Failed to write");
     }
 
+    /// Try to send raw bytes, returning an error if the write fails
+    pub async fn try_send_raw(&mut self, data: &[u8]) -> std::io::Result<()> {
+        self.stream.write_all(data).await
+    }
+
     pub async fn recv_raw(&mut self, timeout_ms: u64) -> Option<Vec<u8>> {
         let mut buf = vec![0u8; 4096];
         match timeout(

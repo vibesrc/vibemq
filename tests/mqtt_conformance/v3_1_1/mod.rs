@@ -10,6 +10,8 @@ pub mod connack;
 pub mod connect;
 pub mod data_representation;
 pub mod disconnect;
+pub mod fixed_header;
+pub mod operational;
 pub mod packet_identifier;
 pub mod pingreq;
 pub mod publish;
