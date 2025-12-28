@@ -104,11 +104,12 @@ where
                                     client_id, will.topic
                                 );
 
+                                let topic_arc: Arc<str> = Arc::from(will.topic.as_str());
                                 let publish = Publish {
                                     dup: false,
                                     qos: will.qos,
                                     retain: will.retain,
-                                    topic: will.topic.clone(),
+                                    topic: topic_arc.clone(),
                                     packet_id: None,
                                     payload: will.payload,
                                     properties: will.properties,
@@ -125,7 +126,7 @@ where
                                         }
                                     } else {
                                         let retained_msg = RetainedMessage {
-                                            topic: will.topic.clone(),
+                                            topic: topic_arc.clone(),
                                             payload: publish.payload.clone(),
                                             qos: publish.qos,
                                             properties: publish.properties.clone(),
@@ -161,11 +162,12 @@ where
                     });
                 } else {
                     // Publish immediately (no delay)
+                    let topic_arc: Arc<str> = Arc::from(will.topic.as_str());
                     let publish = Publish {
                         dup: false,
                         qos: will.qos,
                         retain: will.retain,
-                        topic: will.topic.clone(),
+                        topic: topic_arc.clone(),
                         packet_id: None,
                         payload: will.payload,
                         properties: will.properties,
@@ -182,7 +184,7 @@ where
                             }
                         } else {
                             let retained_msg = RetainedMessage {
-                                topic: will.topic.clone(),
+                                topic: topic_arc.clone(),
                                 payload: publish.payload.clone(),
                                 qos: publish.qos,
                                 properties: publish.properties.clone(),
@@ -327,7 +329,7 @@ pub(crate) async fn route_will_message(
 
     // Notify event subscribers (for bridge forwarding and monitoring)
     let _ = events.send(BrokerEvent::MessagePublished {
-        topic: publish.topic.clone(),
+        topic: publish.topic.to_string(),
         payload: publish.payload.clone(),
         qos: publish.qos,
         retain: publish.retain,

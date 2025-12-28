@@ -3,6 +3,7 @@
 //! These are storage-friendly versions of runtime types that can be
 //! serialized with bincode.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bincode::{Decode, Encode};
@@ -196,7 +197,7 @@ impl From<StoredProperties> for Properties {
 impl From<&Publish> for StoredPublish {
     fn from(publish: &Publish) -> Self {
         Self {
-            topic: publish.topic.clone(),
+            topic: publish.topic.to_string(),
             payload: publish.payload.to_vec(),
             qos: publish.qos as u8,
             retain: publish.retain,
@@ -210,7 +211,7 @@ impl From<&Publish> for StoredPublish {
 impl From<StoredPublish> for Publish {
     fn from(stored: StoredPublish) -> Self {
         Self {
-            topic: stored.topic,
+            topic: Arc::from(stored.topic),
             payload: bytes::Bytes::from(stored.payload),
             qos: QoS::from_u8(stored.qos).unwrap_or_default(),
             retain: stored.retain,
@@ -372,7 +373,7 @@ impl StoredSession {
 impl From<&crate::broker::RetainedMessage> for StoredRetainedMessage {
     fn from(rm: &crate::broker::RetainedMessage) -> Self {
         Self {
-            topic: rm.topic.clone(),
+            topic: rm.topic.to_string(),
             payload: rm.payload.to_vec(),
             qos: rm.qos as u8,
             properties: StoredProperties::from(&rm.properties),

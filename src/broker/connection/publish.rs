@@ -1,5 +1,6 @@
 //! PUBLISH packet handling and message routing
 
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -8,6 +9,20 @@ use parking_lot::RwLock;
 use smallvec::SmallVec;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, trace, warn};
+
+// Thread-local dedup map for route_message to avoid per-publish allocation.
+// Key: client_id, Value: aggregated subscription info
+thread_local! {
+    static DEDUP_MAP: RefCell<AHashMap<Arc<str>, ClientSub>> =
+        RefCell::new(AHashMap::with_capacity(64));
+}
+
+/// Aggregated subscription info for a single client during message routing
+struct ClientSub {
+    qos: QoS,
+    retain_as_published: bool,
+    subscription_ids: SmallVec<[u32; 4]>,
+}
 
 use super::{Connection, ConnectionError};
 use crate::broker::{BrokerEvent, RetainedMessage};
@@ -63,7 +78,7 @@ where
                 // Lookup alias
                 let s = session.read();
                 if let Some(topic) = s.resolve_topic_alias(alias) {
-                    publish.topic = topic.clone();
+                    publish.topic = Arc::from(topic.as_str());
                 } else {
                     // Invalid alias
                     return Err(ConnectionError::Protocol(
@@ -73,7 +88,7 @@ where
             } else {
                 // Register alias
                 let mut s = session.write();
-                s.register_topic_alias(alias, publish.topic.clone());
+                s.register_topic_alias(alias, publish.topic.to_string());
             }
         }
 
@@ -212,12 +227,11 @@ where
                 // For QoS 2, we route after PUBREL (not now)
                 // Handle retained message now, but don't route to subscribers yet
                 if publish.retain && self.config.retain_available {
+                    let topic_str = publish.topic.to_string();
                     if publish.payload.is_empty() {
-                        self.retained.remove(&publish.topic);
+                        self.retained.remove(&topic_str);
                         if let Some(ref persistence) = self.persistence {
-                            persistence.write(PersistenceOp::DeleteRetained {
-                                topic: publish.topic.clone(),
-                            });
+                            persistence.write(PersistenceOp::DeleteRetained { topic: topic_str });
                         }
                     } else {
                         let retained_msg = RetainedMessage {
@@ -228,10 +242,10 @@ where
                             timestamp: Instant::now(),
                         };
                         self.retained
-                            .insert(publish.topic.clone(), retained_msg.clone());
+                            .insert(topic_str.clone(), retained_msg.clone());
                         if let Some(ref persistence) = self.persistence {
                             persistence.write(PersistenceOp::SetRetained {
-                                topic: publish.topic.clone(),
+                                topic: topic_str,
                                 message: StoredRetainedMessage::from(&retained_msg),
                             });
                         }
@@ -243,12 +257,11 @@ where
 
         // Handle retained message
         if publish.retain && self.config.retain_available {
+            let topic_str = publish.topic.to_string();
             if publish.payload.is_empty() {
-                self.retained.remove(&publish.topic);
+                self.retained.remove(&topic_str);
                 if let Some(ref persistence) = self.persistence {
-                    persistence.write(PersistenceOp::DeleteRetained {
-                        topic: publish.topic.clone(),
-                    });
+                    persistence.write(PersistenceOp::DeleteRetained { topic: topic_str });
                 }
             } else {
                 let retained_msg = RetainedMessage {
@@ -259,10 +272,10 @@ where
                     timestamp: Instant::now(),
                 };
                 self.retained
-                    .insert(publish.topic.clone(), retained_msg.clone());
+                    .insert(topic_str.clone(), retained_msg.clone());
                 if let Some(ref persistence) = self.persistence {
                     persistence.write(PersistenceOp::SetRetained {
-                        topic: publish.topic.clone(),
+                        topic: topic_str,
                         message: StoredRetainedMessage::from(&retained_msg),
                     });
                 }
@@ -276,7 +289,7 @@ where
     }
 
     /// Route a message to subscribers
-    /// Uses AHashMap for O(n) deduplication regardless of subscriber count
+    /// Uses thread-local AHashMap for O(n) deduplication, avoiding per-publish allocation
     pub(crate) async fn route_message(
         &self,
         sender_id: &Arc<str>,
@@ -284,91 +297,90 @@ where
     ) -> Result<(), ConnectionError> {
         let matches = self.subscriptions.matches(&publish.topic);
 
-        // Deduplicate by client_id, keeping highest QoS and collecting ALL subscription IDs
-        struct ClientSub {
-            qos: QoS,
-            retain_as_published: bool,
-            subscription_ids: SmallVec<[u32; 4]>,
-        }
+        // Use thread-local map for deduplication (reused across publishes)
+        DEDUP_MAP.with(|map_cell| {
+            let mut client_subs = map_cell.borrow_mut();
+            client_subs.clear(); // Reuse allocation from previous calls
 
-        let mut client_subs: AHashMap<Arc<str>, ClientSub> = AHashMap::with_capacity(matches.len());
+            // Deduplicate by client_id, keeping highest QoS and collecting ALL subscription IDs
+            for sub in &matches {
+                // Skip sender if no_local is set
+                if sub.no_local && sub.client_id == *sender_id {
+                    continue;
+                }
 
-        for sub in matches {
-            // Skip sender if no_local is set
-            if sub.no_local && sub.client_id == *sender_id {
-                continue;
+                if let Some(entry) = client_subs.get_mut(&sub.client_id) {
+                    // Update existing entry
+                    if sub.qos > entry.qos {
+                        entry.qos = sub.qos;
+                    }
+                    if sub.retain_as_published {
+                        entry.retain_as_published = true;
+                    }
+                    if let Some(id) = sub.subscription_id {
+                        if !entry.subscription_ids.contains(&id) {
+                            entry.subscription_ids.push(id);
+                        }
+                    }
+                } else {
+                    // New client - add entry
+                    let mut subscription_ids = SmallVec::new();
+                    if let Some(id) = sub.subscription_id {
+                        subscription_ids.push(id);
+                    }
+                    client_subs.insert(
+                        sub.client_id.clone(),
+                        ClientSub {
+                            qos: sub.qos,
+                            retain_as_published: sub.retain_as_published,
+                            subscription_ids,
+                        },
+                    );
+                }
             }
 
-            if let Some(entry) = client_subs.get_mut(&sub.client_id) {
-                // Update existing entry
-                if sub.qos > entry.qos {
-                    entry.qos = sub.qos;
+            // Send to each client - drain to take ownership without reallocating
+            for (client_id, sub_info) in client_subs.drain() {
+                let effective_qos = publish.qos.min(sub_info.qos);
+
+                let mut outgoing = publish.clone();
+                outgoing.qos = effective_qos;
+                outgoing.dup = false;
+                // Clear incoming packet_id - broker assigns fresh IDs for each subscriber
+                outgoing.packet_id = None;
+
+                // Clear retain flag unless retain_as_published
+                if !sub_info.retain_as_published {
+                    outgoing.retain = false;
                 }
-                if sub.retain_as_published {
-                    entry.retain_as_published = true;
+
+                // Add ALL subscription identifiers
+                for id in sub_info.subscription_ids {
+                    outgoing.properties.subscription_identifiers.push(id);
                 }
-                if let Some(id) = sub.subscription_id {
-                    if !entry.subscription_ids.contains(&id) {
-                        entry.subscription_ids.push(id);
+
+                if let Some(sender) = self.connections.get(&client_id) {
+                    if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) =
+                        sender.try_send(Packet::Publish(outgoing))
+                    {
+                        warn!(client_id = %client_id, "channel full - dropping message");
+                    }
+                } else {
+                    // Client disconnected, queue message if persistent session
+                    if let Some(session) = self.sessions.get(client_id.as_ref()) {
+                        let mut s = session.write();
+                        if !s.clean_start && s.queue_message(outgoing) == QueueResult::DroppedOldest
+                        {
+                            let _ = self.events.send(BrokerEvent::MessageDropped);
+                        }
                     }
                 }
-            } else {
-                // New client - add entry
-                let mut subscription_ids = SmallVec::new();
-                if let Some(id) = sub.subscription_id {
-                    subscription_ids.push(id);
-                }
-                client_subs.insert(
-                    sub.client_id.clone(),
-                    ClientSub {
-                        qos: sub.qos,
-                        retain_as_published: sub.retain_as_published,
-                        subscription_ids,
-                    },
-                );
             }
-        }
-
-        // Send to each client
-        for (client_id, sub_info) in client_subs {
-            let effective_qos = publish.qos.min(sub_info.qos);
-
-            let mut outgoing = publish.clone();
-            outgoing.qos = effective_qos;
-            outgoing.dup = false;
-            // Clear incoming packet_id - broker assigns fresh IDs for each subscriber
-            outgoing.packet_id = None;
-
-            // Clear retain flag unless retain_as_published
-            if !sub_info.retain_as_published {
-                outgoing.retain = false;
-            }
-
-            // Add ALL subscription identifiers
-            for id in sub_info.subscription_ids {
-                outgoing.properties.subscription_identifiers.push(id);
-            }
-
-            if let Some(sender) = self.connections.get(&client_id) {
-                if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) =
-                    sender.try_send(Packet::Publish(outgoing))
-                {
-                    warn!(client_id = %client_id, "channel full - dropping message");
-                }
-            } else {
-                // Client disconnected, queue message if persistent session
-                if let Some(session) = self.sessions.get(client_id.as_ref()) {
-                    let mut s = session.write();
-                    if !s.clean_start && s.queue_message(outgoing) == QueueResult::DroppedOldest {
-                        let _ = self.events.send(BrokerEvent::MessageDropped);
-                    }
-                }
-            }
-        }
+        });
 
         // Notify event subscribers (for bridge forwarding and monitoring)
         let _ = self.events.send(BrokerEvent::MessagePublished {
-            topic: publish.topic.clone(),
+            topic: publish.topic.to_string(),
             payload: publish.payload.clone(),
             qos: publish.qos,
             retain: publish.retain,

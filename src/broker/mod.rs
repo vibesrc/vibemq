@@ -168,7 +168,7 @@ mod num_cpus {
 /// Retained message
 #[derive(Debug, Clone)]
 pub struct RetainedMessage {
-    pub topic: String,
+    pub topic: Arc<str>,
     pub payload: Bytes,
     pub qos: QoS,
     pub properties: Properties,
@@ -336,6 +336,9 @@ impl Broker {
                     topic
                 );
 
+                // Convert topic to Arc<str> for efficient cloning
+                let topic: Arc<str> = Arc::from(topic);
+
                 // Create a publish packet
                 let publish = Publish {
                     dup: false,
@@ -349,12 +352,11 @@ impl Broker {
 
                 // Handle retained message
                 if retain {
+                    let topic_str = topic.to_string();
                     if payload.is_empty() {
-                        retained.remove(&topic);
+                        retained.remove(&topic_str);
                         if let Some(ref persistence) = persistence {
-                            persistence.write(PersistenceOp::DeleteRetained {
-                                topic: topic.clone(),
-                            });
+                            persistence.write(PersistenceOp::DeleteRetained { topic: topic_str });
                         }
                     } else {
                         let retained_msg = RetainedMessage {
@@ -364,10 +366,10 @@ impl Broker {
                             properties: Properties::default(),
                             timestamp: Instant::now(),
                         };
-                        retained.insert(topic.clone(), retained_msg.clone());
+                        retained.insert(topic_str.clone(), retained_msg.clone());
                         if let Some(ref persistence) = persistence {
                             persistence.write(PersistenceOp::SetRetained {
-                                topic: topic.clone(),
+                                topic: topic_str,
                                 message: StoredRetainedMessage::from(&retained_msg),
                             });
                         }
@@ -442,6 +444,9 @@ impl Broker {
 
         let inbound_callback = Arc::new(
             move |topic: String, payload: Bytes, qos: QoS, retain: bool| {
+                // Convert topic to Arc<str> for efficient cloning
+                let topic: Arc<str> = Arc::from(topic);
+
                 // Create a publish packet
                 let publish = Publish {
                     dup: false,
@@ -455,12 +460,11 @@ impl Broker {
 
                 // Handle retained message
                 if retain {
+                    let topic_str = topic.to_string();
                     if payload.is_empty() {
-                        retained.remove(&topic);
+                        retained.remove(&topic_str);
                         if let Some(ref persistence) = persistence {
-                            persistence.write(PersistenceOp::DeleteRetained {
-                                topic: topic.clone(),
-                            });
+                            persistence.write(PersistenceOp::DeleteRetained { topic: topic_str });
                         }
                     } else {
                         let retained_msg = RetainedMessage {
@@ -470,10 +474,10 @@ impl Broker {
                             properties: Properties::default(),
                             timestamp: Instant::now(),
                         };
-                        retained.insert(topic.clone(), retained_msg.clone());
+                        retained.insert(topic_str.clone(), retained_msg.clone());
                         if let Some(ref persistence) = persistence {
                             persistence.write(PersistenceOp::SetRetained {
-                                topic: topic.clone(),
+                                topic: topic_str,
                                 message: StoredRetainedMessage::from(&retained_msg),
                             });
                         }
@@ -1204,12 +1208,15 @@ impl Broker {
 
     /// Publish a message from the server
     pub fn publish(&self, topic: String, payload: Bytes, qos: QoS, retain: bool) {
+        // Convert topic to Arc<str> for efficient cloning in fan-out
+        let topic_arc: Arc<str> = Arc::from(topic.as_str());
+
         // Create a publish packet
         let publish = Publish {
             dup: false,
             qos,
             retain,
-            topic: topic.clone(),
+            topic: topic_arc.clone(),
             packet_id: None,
             payload: payload.clone(),
             properties: Properties::default(),
@@ -1220,13 +1227,11 @@ impl Broker {
             if payload.is_empty() {
                 self.retained.remove(&topic);
                 if let Some(ref persistence) = self.persistence {
-                    persistence.write(PersistenceOp::DeleteRetained {
-                        topic: topic.clone(),
-                    });
+                    persistence.write(PersistenceOp::DeleteRetained { topic });
                 }
             } else {
                 let retained_msg = RetainedMessage {
-                    topic: topic.clone(),
+                    topic: topic_arc.clone(),
                     payload,
                     qos,
                     properties: Properties::default(),
@@ -1235,7 +1240,7 @@ impl Broker {
                 self.retained.insert(topic.clone(), retained_msg.clone());
                 if let Some(ref persistence) = self.persistence {
                     persistence.write(PersistenceOp::SetRetained {
-                        topic: topic.clone(),
+                        topic,
                         message: StoredRetainedMessage::from(&retained_msg),
                     });
                 }
@@ -1243,7 +1248,7 @@ impl Broker {
         }
 
         // Route to subscribers
-        let matches = self.subscriptions.matches(&topic);
+        let matches = self.subscriptions.matches(&topic_arc);
 
         // Deduplicate by client_id (keep highest QoS) - use AHashMap for faster lookup
         let mut client_qos: AHashMap<Arc<str>, QoS> = AHashMap::with_capacity(matches.len());

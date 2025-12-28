@@ -2,6 +2,8 @@
 //!
 //! Unified packet types supporting both MQTT v3.1.1 and v5.0
 
+use std::sync::Arc;
+
 use bytes::Bytes;
 
 use super::{Properties, ProtocolVersion, QoS, ReasonCode, SubscriptionOptions};
@@ -123,6 +125,9 @@ impl Default for ConnAck {
 }
 
 /// PUBLISH packet (bidirectional)
+///
+/// The topic field uses `Arc<str>` for efficient fan-out: when routing a message
+/// to multiple subscribers, cloning the topic is O(1) instead of O(n) for String.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Publish {
     /// Duplicate delivery flag
@@ -131,8 +136,8 @@ pub struct Publish {
     pub qos: QoS,
     /// Retain flag
     pub retain: bool,
-    /// Topic name
-    pub topic: String,
+    /// Topic name (Arc<str> for cheap cloning during fan-out)
+    pub topic: Arc<str>,
     /// Packet identifier (present only for QoS > 0)
     pub packet_id: Option<u16>,
     /// Payload
@@ -147,7 +152,7 @@ impl Default for Publish {
             dup: false,
             qos: QoS::AtMostOnce,
             retain: false,
-            topic: String::new(),
+            topic: Arc::from(""),
             packet_id: None,
             payload: Bytes::new(),
             properties: Properties::default(),

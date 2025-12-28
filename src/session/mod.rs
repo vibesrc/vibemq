@@ -564,7 +564,7 @@ mod tests {
 
         // Create a message with 1 second expiry
         let mut publish1 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("test1"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -576,7 +576,7 @@ mod tests {
 
         // Create a message with no expiry
         let publish2 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("test2"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -587,7 +587,7 @@ mod tests {
 
         // Create a message with long expiry
         let mut publish3 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("test3"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -629,7 +629,7 @@ mod tests {
             Session::new("test".into(), ProtocolVersion::V5, SessionLimits::default());
 
         let mut publish = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("test"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -668,7 +668,7 @@ mod tests {
             Session::new("test".into(), ProtocolVersion::V5, SessionLimits::default());
 
         let mut publish1 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("expires"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -679,7 +679,7 @@ mod tests {
         publish1.properties.message_expiry_interval = Some(1);
 
         let publish2 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("no_expiry"),
             qos: QoS::AtLeastOnce,
             retain: false,

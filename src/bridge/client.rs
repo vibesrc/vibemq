@@ -300,7 +300,7 @@ impl BridgeClient {
                                 dup: false,
                                 qos,
                                 retain,
-                                topic,
+                                topic: Arc::from(topic),
                                 packet_id,
                                 payload,
                                 properties: Properties::default(),
