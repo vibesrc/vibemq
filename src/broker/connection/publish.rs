@@ -25,9 +25,10 @@ struct ClientSub {
 }
 
 use super::{Connection, ConnectionError};
-use crate::broker::{BrokerEvent, RetainedMessage};
+use crate::broker::{BrokerEvent, OutboundMessage, RetainedMessage};
+use crate::codec::PublishCache;
 use crate::persistence::{PersistenceOp, StoredRetainedMessage};
-use crate::protocol::{Packet, Properties, PubAck, PubRec, Publish, QoS, ReasonCode};
+use crate::protocol::{Packet, Properties, ProtocolVersion, PubAck, PubRec, Publish, QoS, ReasonCode};
 use crate::session::{QueueResult, Session};
 use crate::topic::validate_topic_name_with_max_levels;
 
@@ -289,13 +290,18 @@ where
     }
 
     /// Route a message to subscribers
-    /// Uses thread-local AHashMap for O(n) deduplication, avoiding per-publish allocation
+    /// Uses thread-local AHashMap for O(n) deduplication, avoiding per-publish allocation.
+    /// Uses CachedPublish for QoS 0 messages (pre-serialized bytes with memcpy + patch).
     pub(crate) async fn route_message(
         &self,
         sender_id: &Arc<str>,
         publish: &Publish,
     ) -> Result<(), ConnectionError> {
         let matches = self.subscriptions.matches(&publish.topic);
+
+        // Pre-serialize for QoS 0 fan-out optimization.
+        // Create cache lazily only if we have subscribers.
+        let mut publish_cache: Option<PublishCache> = None;
 
         // Use thread-local map for deduplication (reused across publishes)
         DEDUP_MAP.with(|map_cell| {
@@ -339,29 +345,71 @@ where
                 }
             }
 
+            // Initialize cache if we have subscribers (lazy init)
+            if !client_subs.is_empty() {
+                publish_cache = Some(PublishCache::new());
+            }
+
             // Send to each client - drain to take ownership without reallocating
             for (client_id, sub_info) in client_subs.drain() {
                 let effective_qos = publish.qos.min(sub_info.qos);
+                let effective_retain = if sub_info.retain_as_published {
+                    publish.retain
+                } else {
+                    false
+                };
 
-                let mut outgoing = publish.clone();
-                outgoing.qos = effective_qos;
-                outgoing.dup = false;
-                // Clear incoming packet_id - broker assigns fresh IDs for each subscriber
-                outgoing.packet_id = None;
-
-                // Clear retain flag unless retain_as_published
-                if !sub_info.retain_as_published {
-                    outgoing.retain = false;
-                }
-
-                // Add ALL subscription identifiers
-                for id in sub_info.subscription_ids {
-                    outgoing.properties.subscription_identifiers.push(id);
-                }
+                // Use CachedPublish when no subscription identifiers
+                // (subscription IDs are encoded in properties and can't be patched)
+                let can_use_cached = sub_info.subscription_ids.is_empty();
 
                 if let Some(sender) = self.connections.get(&client_id) {
+                    if can_use_cached {
+                        // Fast path: pre-serialized bytes
+                        // Get protocol version from session for proper cache selection
+                        let version = self.sessions
+                            .get(client_id.as_ref())
+                            .map(|s| s.read().protocol_version)
+                            .unwrap_or(ProtocolVersion::V311);
+
+                        if let Some(ref mut cache) = publish_cache {
+                            // Use appropriate cache based on QoS
+                            let cached_result = if effective_qos == QoS::AtMostOnce {
+                                cache.get_or_create_qos0(publish, version)
+                            } else {
+                                cache.get_or_create(publish, version)
+                            };
+
+                            if let Ok(cached) = cached_result {
+                                let msg = OutboundMessage::CachedPublish {
+                                    cached: Arc::new(cached.clone()),
+                                    qos: effective_qos,
+                                    retain: effective_retain,
+                                };
+                                if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) =
+                                    sender.try_send(msg)
+                                {
+                                    warn!(client_id = %client_id, "channel full - dropping message");
+                                }
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Fallback path: clone and modify Publish (subscription IDs present)
+                    let mut outgoing = publish.clone();
+                    outgoing.qos = effective_qos;
+                    outgoing.dup = false;
+                    outgoing.packet_id = None;
+                    outgoing.retain = effective_retain;
+
+                    // Add ALL subscription identifiers
+                    for id in &sub_info.subscription_ids {
+                        outgoing.properties.subscription_identifiers.push(*id);
+                    }
+
                     if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) =
-                        sender.try_send(Packet::Publish(outgoing))
+                        sender.try_send(OutboundMessage::Packet(Packet::Publish(outgoing)))
                     {
                         warn!(client_id = %client_id, "channel full - dropping message");
                     }
@@ -369,9 +417,20 @@ where
                     // Client disconnected, queue message if persistent session
                     if let Some(session) = self.sessions.get(client_id.as_ref()) {
                         let mut s = session.write();
-                        if !s.clean_start && s.queue_message(outgoing) == QueueResult::DroppedOldest
-                        {
-                            let _ = self.events.send(BrokerEvent::MessageDropped);
+                        if !s.clean_start {
+                            let mut outgoing = publish.clone();
+                            outgoing.qos = effective_qos;
+                            outgoing.dup = false;
+                            outgoing.packet_id = None;
+                            outgoing.retain = effective_retain;
+
+                            for id in &sub_info.subscription_ids {
+                                outgoing.properties.subscription_identifiers.push(*id);
+                            }
+
+                            if s.queue_message(outgoing) == QueueResult::DroppedOldest {
+                                let _ = self.events.send(BrokerEvent::MessageDropped);
+                            }
                         }
                     }
                 }

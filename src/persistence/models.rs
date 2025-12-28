@@ -293,20 +293,37 @@ impl From<StoredPendingMessage> for PendingMessage {
     }
 }
 
-impl From<&InflightMessage> for StoredInflightMessage {
-    fn from(im: &InflightMessage) -> Self {
-        let qos2_state = match im.qos2_state {
-            None => 0,
-            Some(Qos2State::WaitingPubRec) => 1,
-            Some(Qos2State::WaitingPubComp) => 2,
-        };
+impl StoredInflightMessage {
+    /// Try to create from an InflightMessage
+    /// Returns None for Cached variants (no Publish data to persist)
+    pub fn try_from_inflight(im: &InflightMessage) -> Option<Self> {
+        match im {
+            InflightMessage::Full {
+                packet_id,
+                publish,
+                qos2_state,
+                sent_at,
+                retry_count,
+            } => {
+                let qos2_state_code = match qos2_state {
+                    None => 0,
+                    Some(Qos2State::WaitingPubRec) => 1,
+                    Some(Qos2State::WaitingPubComp) => 2,
+                };
 
-        Self {
-            packet_id: im.packet_id,
-            publish: StoredPublish::from(&im.publish),
-            qos2_state,
-            sent_at_secs: instant_to_unix_secs(im.sent_at),
-            retry_count: im.retry_count,
+                Some(Self {
+                    packet_id: *packet_id,
+                    publish: StoredPublish::from(publish),
+                    qos2_state: qos2_state_code,
+                    sent_at_secs: instant_to_unix_secs(*sent_at),
+                    retry_count: *retry_count,
+                })
+            }
+            InflightMessage::Cached { .. } => {
+                // Cached variants don't have the original Publish data
+                // They won't be persisted; on reconnect, publisher will retry
+                None
+            }
         }
     }
 }
@@ -319,7 +336,8 @@ impl From<StoredInflightMessage> for InflightMessage {
             _ => None,
         };
 
-        Self {
+        // Always load as Full variant from storage
+        InflightMessage::Full {
             packet_id: stored.packet_id,
             publish: Publish::from(stored.publish),
             qos2_state,
@@ -350,7 +368,7 @@ impl StoredSession {
             inflight_outgoing: session
                 .inflight_outgoing
                 .values()
-                .map(StoredInflightMessage::from)
+                .filter_map(StoredInflightMessage::try_from_inflight)
                 .collect(),
             inflight_incoming: session
                 .inflight_incoming

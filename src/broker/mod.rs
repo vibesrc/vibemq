@@ -29,6 +29,7 @@ const TCP_BACKLOG: i32 = 4096;
 
 use crate::bridge::BridgeManager;
 use crate::cluster::ClusterManager;
+use crate::codec::CachedPublish;
 use crate::config::ProxyProtocolConfig;
 use crate::flapping::FlappingDetector;
 use crate::hooks::{DefaultHooks, Hooks};
@@ -39,6 +40,28 @@ use crate::proxy::{parse_proxy_header, ProxyInfo};
 use crate::session::SessionStore;
 use crate::topic::SubscriptionStore;
 use crate::transport::WsStream;
+
+/// Message sent to a connection for outbound delivery.
+///
+/// This enum enables pre-serialization optimization for PUBLISH fan-out:
+/// - `CachedPublish`: Pre-serialized bytes that can be written with memcpy + patching
+/// - `Packet`: Standard packet that requires full encoding (fallback for complex cases)
+#[derive(Debug)]
+pub enum OutboundMessage {
+    /// Pre-serialized PUBLISH for efficient fan-out.
+    /// Used when subscription_ids are empty (most common case).
+    CachedPublish {
+        /// Shared pre-serialized bytes (one allocation for all subscribers)
+        cached: Arc<CachedPublish>,
+        /// QoS for this subscriber (patches first byte)
+        qos: QoS,
+        /// Retain flag for this subscriber
+        retain: bool,
+    },
+    /// Standard packet requiring full encoding.
+    /// Used for non-PUBLISH packets or when subscription_ids are present.
+    Packet(Packet),
+}
 
 /// Broker configuration
 #[derive(Debug, Clone)]
@@ -211,7 +234,7 @@ pub struct Broker {
     /// Retained messages
     retained: Arc<DashMap<String, RetainedMessage>>,
     /// Active connections (client_id -> connection handle)
-    connections: Arc<DashMap<Arc<str>, mpsc::Sender<Packet>>>,
+    connections: Arc<DashMap<Arc<str>, mpsc::Sender<OutboundMessage>>>,
     /// Shutdown signal
     shutdown: broadcast::Sender<()>,
     /// Event channel
@@ -404,7 +427,7 @@ impl Broker {
                     if let Some(sender) = connections.get(&client_id) {
                         let mut publish = publish.clone();
                         publish.qos = effective_qos;
-                        match sender.try_send(Packet::Publish(publish)) {
+                        match sender.try_send(OutboundMessage::Packet(Packet::Publish(publish))) {
                             Ok(()) => {
                                 debug!("Cluster inbound_callback: sent to client {}", client_id)
                             }
@@ -506,7 +529,7 @@ impl Broker {
                     if let Some(sender) = connections.get(&client_id) {
                         let mut publish = publish.clone();
                         publish.qos = effective_qos;
-                        let _ = sender.try_send(Packet::Publish(publish));
+                        let _ = sender.try_send(OutboundMessage::Packet(Packet::Publish(publish)));
                     } else {
                         // Client disconnected, queue message if persistent session
                         if let Some(session) = sessions.get(client_id.as_ref()) {
@@ -1270,7 +1293,7 @@ impl Broker {
                 publish.qos = effective_qos;
 
                 // For QoS > 0, packet_id will be assigned by the connection handler
-                let _ = sender.try_send(Packet::Publish(publish));
+                let _ = sender.try_send(OutboundMessage::Packet(Packet::Publish(publish)));
             } else {
                 // Client disconnected, queue message if persistent session
                 if let Some(session) = self.sessions.get(client_id.as_ref()) {
@@ -1301,7 +1324,7 @@ fn spawn_connection_handler(
     sessions: Arc<SessionStore>,
     subscriptions: Arc<SubscriptionStore>,
     retained: Arc<DashMap<String, RetainedMessage>>,
-    connections: Arc<DashMap<Arc<str>, mpsc::Sender<Packet>>>,
+    connections: Arc<DashMap<Arc<str>, mpsc::Sender<OutboundMessage>>>,
     config: BrokerConfig,
     events: broadcast::Sender<BrokerEvent>,
     hooks: Arc<dyn Hooks>,

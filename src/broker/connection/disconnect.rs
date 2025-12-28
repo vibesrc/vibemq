@@ -12,7 +12,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::debug;
 
 use super::{Connection, ConnectionError};
-use crate::broker::{BrokerEvent, RetainedMessage};
+use crate::broker::{BrokerEvent, OutboundMessage, RetainedMessage};
 use crate::persistence::{PersistenceOp, StoredRetainedMessage, StoredSession};
 use crate::protocol::{Packet, Publish, QoS};
 use crate::session::{QueueResult, Session, SessionStore};
@@ -247,7 +247,7 @@ where
 /// Performance: Uses AHashMap for deduplication and SmallVec for subscription IDs
 pub(crate) async fn route_will_message(
     subscriptions: &SubscriptionStore,
-    connections: &DashMap<Arc<str>, mpsc::Sender<Packet>>,
+    connections: &DashMap<Arc<str>, mpsc::Sender<OutboundMessage>>,
     sessions: &SessionStore,
     events: &broadcast::Sender<BrokerEvent>,
     sender_id: &Arc<str>,
@@ -315,7 +315,7 @@ pub(crate) async fn route_will_message(
         }
 
         if let Some(sender) = connections.get(&client_id) {
-            let _ = sender.try_send(Packet::Publish(outgoing));
+            let _ = sender.try_send(OutboundMessage::Packet(Packet::Publish(outgoing)));
         } else {
             // Client disconnected, queue message if persistent session
             if let Some(session) = sessions.get(client_id.as_ref()) {

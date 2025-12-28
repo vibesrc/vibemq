@@ -26,7 +26,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
-use crate::broker::{BrokerConfig, BrokerEvent, RetainedMessage};
+use crate::broker::{BrokerConfig, BrokerEvent, OutboundMessage, RetainedMessage};
 use crate::buffer_pool;
 use crate::codec::{Decoder, Encoder};
 use crate::hooks::Hooks;
@@ -93,11 +93,11 @@ pub struct Connection<S> {
     pub(crate) sessions: Arc<SessionStore>,
     pub(crate) subscriptions: Arc<SubscriptionStore>,
     pub(crate) retained: Arc<DashMap<String, RetainedMessage>>,
-    pub(crate) connections: Arc<DashMap<Arc<str>, mpsc::Sender<Packet>>>,
+    pub(crate) connections: Arc<DashMap<Arc<str>, mpsc::Sender<OutboundMessage>>>,
     pub(crate) config: BrokerConfig,
     pub(crate) events: broadcast::Sender<BrokerEvent>,
-    pub(crate) packet_tx: mpsc::Sender<Packet>,
-    pub(crate) packet_rx: mpsc::Receiver<Packet>,
+    pub(crate) packet_tx: mpsc::Sender<OutboundMessage>,
+    pub(crate) packet_rx: mpsc::Receiver<OutboundMessage>,
     pub(crate) hooks: Arc<dyn Hooks>,
     pub(crate) metrics: Option<Arc<Metrics>>,
     /// Persistence manager for durable storage
@@ -121,7 +121,7 @@ where
         sessions: Arc<SessionStore>,
         subscriptions: Arc<SubscriptionStore>,
         retained: Arc<DashMap<String, RetainedMessage>>,
-        connections: Arc<DashMap<Arc<str>, mpsc::Sender<Packet>>>,
+        connections: Arc<DashMap<Arc<str>, mpsc::Sender<OutboundMessage>>>,
         config: BrokerConfig,
         events: broadcast::Sender<BrokerEvent>,
         hooks: Arc<dyn Hooks>,
@@ -191,7 +191,7 @@ where
         } else {
             Duration::from_secs(u64::MAX) // Effectively disabled
         };
-        info!(
+        debug!(
             "Keep alive for {}: {}s -> timeout {:?}",
             client_id, keep_alive_secs, keep_alive
         );
@@ -258,8 +258,8 @@ where
                 }
 
                 // Receive packets to send
-                Some(packet) = self.packet_rx.recv() => {
-                    self.handle_outgoing_packet(&session, packet).await?;
+                Some(msg) = self.packet_rx.recv() => {
+                    self.handle_outgoing_message(&session, msg).await?;
                 }
 
                 // Retry unacked messages
@@ -289,97 +289,85 @@ where
         }
     }
 
-    /// Handle outgoing packet from the channel
-    async fn handle_outgoing_packet(
+    /// Handle outgoing message from the channel.
+    /// Supports both pre-serialized CachedPublish (fast path) and regular Packet encoding.
+    async fn handle_outgoing_message(
         &mut self,
         session: &Arc<RwLock<Session>>,
-        packet: Packet,
+        msg: OutboundMessage,
     ) -> Result<(), ConnectionError> {
         use crate::protocol::QoS;
         use crate::session::{InflightMessage, Qos2State, QueueResult};
 
-        match packet {
-            Packet::Disconnect(_) => {
-                // We're being disconnected (session takeover)
-                // Per MQTT spec, after sending DISCONNECT, we must close the connection
-                self.write_buf.clear();
-                let _ = self.encoder.encode(&packet, &mut self.write_buf);
-                let _ = self.stream.write_all(&self.write_buf).await;
-                // Return Shutdown to terminate the connection loop
-                Err(ConnectionError::Shutdown)
-            }
-            Packet::Publish(mut publish) => {
-                // Get max packet size from session
+        match msg {
+            OutboundMessage::CachedPublish { cached, qos, retain } => {
+                // Fast path: pre-serialized bytes with in-place patching
                 let max_packet_size = {
                     let s = session.read();
                     s.max_packet_size
                 };
 
-                // Per MQTT v5.0 spec [MQTT-4.9.0-2]: MUST NOT send QoS>0
-                // PUBLISH when send quota is 0
-                if publish.qos != QoS::AtMostOnce {
-                    let mut s = session.write();
-                    if !s.decrement_send_quota() {
-                        // Quota exhausted - queue message for later delivery
-                        debug!("Send quota exhausted for {}, queuing message", s.client_id);
-                        if s.queue_message(publish) == QueueResult::DroppedOldest {
-                            warn!(client_id = %s.client_id, "message dropped - queue full (quota exhausted)");
-                            let _ = self.events.send(BrokerEvent::MessageDropped);
-                        }
-                        return Ok(());
-                    }
-                    // Check max_inflight limit
-                    if s.inflight_outgoing.len() >= s.max_inflight as usize {
-                        // Inflight limit reached - queue and restore quota
-                        s.increment_send_quota();
-                        debug!(
-                            "Inflight limit ({}) reached for {}, queuing message",
-                            s.max_inflight, s.client_id
-                        );
-                        if s.queue_message(publish) == QueueResult::DroppedOldest {
-                            warn!(client_id = %s.client_id, "message dropped - queue full (inflight limit)");
-                            let _ = self.events.send(BrokerEvent::MessageDropped);
-                        }
-                        return Ok(());
-                    }
-                    // Assign packet ID
-                    if publish.packet_id.is_none() {
-                        publish.packet_id = Some(s.next_packet_id());
-                    }
-                    // Store inflight
-                    if let Some(packet_id) = publish.packet_id {
-                        s.inflight_outgoing.insert(
-                            packet_id,
-                            InflightMessage {
-                                packet_id,
-                                publish: publish.clone(),
-                                qos2_state: if publish.qos == QoS::ExactlyOnce {
-                                    Some(Qos2State::WaitingPubRec)
-                                } else {
-                                    None
-                                },
-                                sent_at: Instant::now(),
-                                retry_count: 0,
-                            },
-                        );
-                    }
-                }
-
-                self.write_buf.clear();
-                self.encoder
-                    .encode(&Packet::Publish(publish), &mut self.write_buf)
-                    .map_err(|e| ConnectionError::Protocol(e.into()))?;
-
-                // Per MQTT v5.0 spec [MQTT-3.1.2-24]: MUST NOT send packets
-                // exceeding client's Maximum Packet Size
-                if self.write_buf.len() > max_packet_size as usize {
+                // Check size before writing
+                if cached.len() > max_packet_size as usize {
                     warn!(
-                        "Dropping PUBLISH: encoded size {} exceeds client max {}",
-                        self.write_buf.len(),
+                        "Dropping PUBLISH: cached size {} exceeds client max {}",
+                        cached.len(),
                         max_packet_size
                     );
                     return Ok(());
                 }
+
+                // For QoS > 0, need packet_id and inflight tracking
+                let packet_id = if qos != QoS::AtMostOnce {
+                    let mut s = session.write();
+
+                    // Per MQTT v5.0 spec [MQTT-4.9.0-2]: MUST NOT send QoS>0
+                    // PUBLISH when send quota is 0
+                    if !s.decrement_send_quota() {
+                        // Quota exhausted - can't queue CachedPublish, drop it
+                        // (For proper queuing, would need to store original Publish)
+                        debug!("Send quota exhausted, dropping cached message");
+                        let _ = self.events.send(BrokerEvent::MessageDropped);
+                        return Ok(());
+                    }
+
+                    // Check max_inflight limit
+                    if s.inflight_outgoing.len() >= s.max_inflight as usize {
+                        s.increment_send_quota();
+                        debug!("Inflight limit reached, dropping cached message");
+                        let _ = self.events.send(BrokerEvent::MessageDropped);
+                        return Ok(());
+                    }
+
+                    // Assign packet ID
+                    let pid = s.next_packet_id();
+
+                    // Store in inflight for retransmission
+                    s.inflight_outgoing.insert(
+                        pid,
+                        InflightMessage::Cached {
+                            packet_id: pid,
+                            cached: cached.clone(),
+                            qos,
+                            retain,
+                            qos2_state: if qos == QoS::ExactlyOnce {
+                                Some(Qos2State::WaitingPubRec)
+                            } else {
+                                None
+                            },
+                            sent_at: Instant::now(),
+                            retry_count: 0,
+                        },
+                    );
+
+                    Some(pid)
+                } else {
+                    None
+                };
+
+                self.write_buf.clear();
+                // Use pre-serialized bytes with patching (memcpy + patch first_byte + packet_id)
+                cached.write_to(&mut self.write_buf, packet_id, qos, retain, false);
 
                 let bytes_sent = self.write_buf.len();
                 self.stream.write_all(&self.write_buf).await?;
@@ -388,13 +376,107 @@ where
                 }
                 Ok(())
             }
-            _ => {
-                self.write_buf.clear();
-                self.encoder
-                    .encode(&packet, &mut self.write_buf)
-                    .map_err(|e| ConnectionError::Protocol(e.into()))?;
-                self.stream.write_all(&self.write_buf).await?;
-                Ok(())
+            OutboundMessage::Packet(packet) => {
+                // Standard path: full encoding
+                match packet {
+                    Packet::Disconnect(_) => {
+                        // We're being disconnected (session takeover)
+                        // Per MQTT spec, after sending DISCONNECT, we must close the connection
+                        self.write_buf.clear();
+                        let _ = self.encoder.encode(&packet, &mut self.write_buf);
+                        let _ = self.stream.write_all(&self.write_buf).await;
+                        // Return Shutdown to terminate the connection loop
+                        Err(ConnectionError::Shutdown)
+                    }
+                    Packet::Publish(mut publish) => {
+                        // Get max packet size from session
+                        let max_packet_size = {
+                            let s = session.read();
+                            s.max_packet_size
+                        };
+
+                        // Per MQTT v5.0 spec [MQTT-4.9.0-2]: MUST NOT send QoS>0
+                        // PUBLISH when send quota is 0
+                        if publish.qos != QoS::AtMostOnce {
+                            let mut s = session.write();
+                            if !s.decrement_send_quota() {
+                                // Quota exhausted - queue message for later delivery
+                                debug!("Send quota exhausted for {}, queuing message", s.client_id);
+                                if s.queue_message(publish) == QueueResult::DroppedOldest {
+                                    warn!(client_id = %s.client_id, "message dropped - queue full (quota exhausted)");
+                                    let _ = self.events.send(BrokerEvent::MessageDropped);
+                                }
+                                return Ok(());
+                            }
+                            // Check max_inflight limit
+                            if s.inflight_outgoing.len() >= s.max_inflight as usize {
+                                // Inflight limit reached - queue and restore quota
+                                s.increment_send_quota();
+                                debug!(
+                                    "Inflight limit ({}) reached for {}, queuing message",
+                                    s.max_inflight, s.client_id
+                                );
+                                if s.queue_message(publish) == QueueResult::DroppedOldest {
+                                    warn!(client_id = %s.client_id, "message dropped - queue full (inflight limit)");
+                                    let _ = self.events.send(BrokerEvent::MessageDropped);
+                                }
+                                return Ok(());
+                            }
+                            // Assign packet ID
+                            if publish.packet_id.is_none() {
+                                publish.packet_id = Some(s.next_packet_id());
+                            }
+                            // Store inflight (Full variant for Packet path with subscription IDs)
+                            if let Some(packet_id) = publish.packet_id {
+                                s.inflight_outgoing.insert(
+                                    packet_id,
+                                    InflightMessage::Full {
+                                        packet_id,
+                                        publish: publish.clone(),
+                                        qos2_state: if publish.qos == QoS::ExactlyOnce {
+                                            Some(Qos2State::WaitingPubRec)
+                                        } else {
+                                            None
+                                        },
+                                        sent_at: Instant::now(),
+                                        retry_count: 0,
+                                    },
+                                );
+                            }
+                        }
+
+                        self.write_buf.clear();
+                        self.encoder
+                            .encode(&Packet::Publish(publish), &mut self.write_buf)
+                            .map_err(|e| ConnectionError::Protocol(e.into()))?;
+
+                        // Per MQTT v5.0 spec [MQTT-3.1.2-24]: MUST NOT send packets
+                        // exceeding client's Maximum Packet Size
+                        if self.write_buf.len() > max_packet_size as usize {
+                            warn!(
+                                "Dropping PUBLISH: encoded size {} exceeds client max {}",
+                                self.write_buf.len(),
+                                max_packet_size
+                            );
+                            return Ok(());
+                        }
+
+                        let bytes_sent = self.write_buf.len();
+                        self.stream.write_all(&self.write_buf).await?;
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.publish_sent(bytes_sent);
+                        }
+                        Ok(())
+                    }
+                    _ => {
+                        self.write_buf.clear();
+                        self.encoder
+                            .encode(&packet, &mut self.write_buf)
+                            .map_err(|e| ConnectionError::Protocol(e.into()))?;
+                        self.stream.write_all(&self.write_buf).await?;
+                        Ok(())
+                    }
+                }
             }
         }
     }
