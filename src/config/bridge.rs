@@ -163,17 +163,17 @@ pub struct BridgeConfig {
     #[serde(default = "default_true")]
     pub clean_start: bool,
 
-    /// Reconnect interval in seconds
-    #[serde(default = "default_reconnect_interval")]
-    pub reconnect_interval: u64,
+    /// Reconnect interval (e.g., "5s", "1m")
+    #[serde(default = "default_reconnect_interval", with = "humantime_serde")]
+    pub reconnect_interval: Duration,
 
-    /// Maximum reconnect interval in seconds (for exponential backoff)
-    #[serde(default = "default_max_reconnect_interval")]
-    pub max_reconnect_interval: u64,
+    /// Maximum reconnect interval for exponential backoff (e.g., "60s", "5m")
+    #[serde(default = "default_max_reconnect_interval", with = "humantime_serde")]
+    pub max_reconnect_interval: Duration,
 
-    /// Connection timeout in seconds
-    #[serde(default = "default_connect_timeout")]
-    pub connect_timeout: u64,
+    /// Connection timeout (e.g., "30s", "1m")
+    #[serde(default = "default_connect_timeout", with = "humantime_serde")]
+    pub connect_timeout: Duration,
 
     /// Topic forwarding rules
     #[serde(default, alias = "forward")]
@@ -209,16 +209,16 @@ fn default_keepalive() -> u16 {
     60
 }
 
-fn default_reconnect_interval() -> u64 {
-    5
+fn default_reconnect_interval() -> Duration {
+    Duration::from_secs(5)
 }
 
-fn default_max_reconnect_interval() -> u64 {
-    60
+fn default_max_reconnect_interval() -> Duration {
+    Duration::from_secs(60)
 }
 
-fn default_connect_timeout() -> u64 {
-    30
+fn default_connect_timeout() -> Duration {
+    Duration::from_secs(30)
 }
 
 fn default_ws_path() -> String {
@@ -236,9 +236,9 @@ impl Default for BridgeConfig {
             password: None,
             keepalive: default_keepalive(),
             clean_start: true,
-            reconnect_interval: default_reconnect_interval(),
-            max_reconnect_interval: default_max_reconnect_interval(),
-            connect_timeout: default_connect_timeout(),
+            reconnect_interval: Duration::from_secs(5),
+            max_reconnect_interval: Duration::from_secs(60),
+            connect_timeout: Duration::from_secs(30),
             forwards: Vec::new(),
             tls: None,
             ws_path: default_ws_path(),
@@ -250,21 +250,6 @@ impl Default for BridgeConfig {
 }
 
 impl BridgeConfig {
-    /// Get the reconnect interval as Duration
-    pub fn reconnect_interval_duration(&self) -> Duration {
-        Duration::from_secs(self.reconnect_interval)
-    }
-
-    /// Get the max reconnect interval as Duration
-    pub fn max_reconnect_interval_duration(&self) -> Duration {
-        Duration::from_secs(self.max_reconnect_interval)
-    }
-
-    /// Get the connect timeout as Duration
-    pub fn connect_timeout_duration(&self) -> Duration {
-        Duration::from_secs(self.connect_timeout)
-    }
-
     /// Parse address into host and port
     pub fn parse_address(&self) -> (String, u16) {
         if let Some((host, port_str)) = self.address.rsplit_once(':') {

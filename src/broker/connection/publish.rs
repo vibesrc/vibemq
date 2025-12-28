@@ -11,6 +11,7 @@ use tracing::{debug, error, trace, warn};
 
 use super::{Connection, ConnectionError};
 use crate::broker::{BrokerEvent, RetainedMessage};
+use crate::persistence::{PersistenceOp, StoredRetainedMessage};
 use crate::protocol::{Packet, Properties, PubAck, PubRec, Publish, QoS, ReasonCode};
 use crate::session::{QueueResult, Session};
 use crate::topic::validate_topic_name_with_max_levels;
@@ -213,17 +214,27 @@ where
                 if publish.retain && self.config.retain_available {
                     if publish.payload.is_empty() {
                         self.retained.remove(&publish.topic);
-                    } else {
-                        self.retained.insert(
-                            publish.topic.clone(),
-                            RetainedMessage {
+                        if let Some(ref persistence) = self.persistence {
+                            persistence.write(PersistenceOp::DeleteRetained {
                                 topic: publish.topic.clone(),
-                                payload: publish.payload.clone(),
-                                qos: publish.qos,
-                                properties: publish.properties.clone(),
-                                timestamp: Instant::now(),
-                            },
-                        );
+                            });
+                        }
+                    } else {
+                        let retained_msg = RetainedMessage {
+                            topic: publish.topic.clone(),
+                            payload: publish.payload.clone(),
+                            qos: publish.qos,
+                            properties: publish.properties.clone(),
+                            timestamp: Instant::now(),
+                        };
+                        self.retained
+                            .insert(publish.topic.clone(), retained_msg.clone());
+                        if let Some(ref persistence) = self.persistence {
+                            persistence.write(PersistenceOp::SetRetained {
+                                topic: publish.topic.clone(),
+                                message: StoredRetainedMessage::from(&retained_msg),
+                            });
+                        }
                     }
                 }
                 return Ok(());
@@ -234,17 +245,27 @@ where
         if publish.retain && self.config.retain_available {
             if publish.payload.is_empty() {
                 self.retained.remove(&publish.topic);
-            } else {
-                self.retained.insert(
-                    publish.topic.clone(),
-                    RetainedMessage {
+                if let Some(ref persistence) = self.persistence {
+                    persistence.write(PersistenceOp::DeleteRetained {
                         topic: publish.topic.clone(),
-                        payload: publish.payload.clone(),
-                        qos: publish.qos,
-                        properties: publish.properties.clone(),
-                        timestamp: Instant::now(),
-                    },
-                );
+                    });
+                }
+            } else {
+                let retained_msg = RetainedMessage {
+                    topic: publish.topic.clone(),
+                    payload: publish.payload.clone(),
+                    qos: publish.qos,
+                    properties: publish.properties.clone(),
+                    timestamp: Instant::now(),
+                };
+                self.retained
+                    .insert(publish.topic.clone(), retained_msg.clone());
+                if let Some(ref persistence) = self.persistence {
+                    persistence.write(PersistenceOp::SetRetained {
+                        topic: publish.topic.clone(),
+                        message: StoredRetainedMessage::from(&retained_msg),
+                    });
+                }
             }
         }
 

@@ -13,6 +13,7 @@ use tracing::debug;
 
 use super::{Connection, ConnectionError};
 use crate::broker::{BrokerEvent, RetainedMessage};
+use crate::persistence::{PersistenceOp, StoredRetainedMessage, StoredSession};
 use crate::protocol::{Packet, Publish, QoS};
 use crate::session::{QueueResult, Session, SessionStore};
 use crate::topic::SubscriptionStore;
@@ -57,6 +58,7 @@ where
                     let sessions = self.sessions.clone();
                     let config = self.config.clone();
                     let events = self.events.clone();
+                    let persistence = self.persistence.clone();
                     let delay = Duration::from_secs(will_delay_interval as u64);
 
                     // Capture the disconnect timestamp to detect reconnect+disconnect cycles
@@ -116,17 +118,26 @@ where
                                 if will.retain && config.retain_available {
                                     if publish.payload.is_empty() {
                                         retained.remove(&will.topic);
-                                    } else {
-                                        retained.insert(
-                                            will.topic.clone(),
-                                            RetainedMessage {
+                                        if let Some(ref persistence) = persistence {
+                                            persistence.write(PersistenceOp::DeleteRetained {
                                                 topic: will.topic.clone(),
-                                                payload: publish.payload.clone(),
-                                                qos: publish.qos,
-                                                properties: publish.properties.clone(),
-                                                timestamp: Instant::now(),
-                                            },
-                                        );
+                                            });
+                                        }
+                                    } else {
+                                        let retained_msg = RetainedMessage {
+                                            topic: will.topic.clone(),
+                                            payload: publish.payload.clone(),
+                                            qos: publish.qos,
+                                            properties: publish.properties.clone(),
+                                            timestamp: Instant::now(),
+                                        };
+                                        retained.insert(will.topic.clone(), retained_msg.clone());
+                                        if let Some(ref persistence) = persistence {
+                                            persistence.write(PersistenceOp::SetRetained {
+                                                topic: will.topic.clone(),
+                                                message: StoredRetainedMessage::from(&retained_msg),
+                                            });
+                                        }
                                     }
                                 }
 
@@ -164,17 +175,27 @@ where
                     if will.retain && self.config.retain_available {
                         if publish.payload.is_empty() {
                             self.retained.remove(&will.topic);
-                        } else {
-                            self.retained.insert(
-                                will.topic.clone(),
-                                RetainedMessage {
+                            if let Some(ref persistence) = self.persistence {
+                                persistence.write(PersistenceOp::DeleteRetained {
                                     topic: will.topic.clone(),
-                                    payload: publish.payload.clone(),
-                                    qos: publish.qos,
-                                    properties: publish.properties.clone(),
-                                    timestamp: Instant::now(),
-                                },
-                            );
+                                });
+                            }
+                        } else {
+                            let retained_msg = RetainedMessage {
+                                topic: will.topic.clone(),
+                                payload: publish.payload.clone(),
+                                qos: publish.qos,
+                                properties: publish.properties.clone(),
+                                timestamp: Instant::now(),
+                            };
+                            self.retained
+                                .insert(will.topic.clone(), retained_msg.clone());
+                            if let Some(ref persistence) = self.persistence {
+                                persistence.write(PersistenceOp::SetRetained {
+                                    topic: will.topic.clone(),
+                                    message: StoredRetainedMessage::from(&retained_msg),
+                                });
+                            }
                         }
                     }
 
@@ -192,6 +213,23 @@ where
             // Normal disconnect - clear will from session
             let mut s = session.write();
             s.will = None;
+        }
+
+        // Persist session on disconnect if non-ephemeral
+        if let Some(ref persistence) = self.persistence {
+            let s = session.read();
+            // Only persist non-clean sessions with expiry > 0
+            if !s.clean_start && s.session_expiry_interval > 0 {
+                persistence.write(PersistenceOp::SetSession {
+                    client_id: client_id.to_string(),
+                    session: StoredSession::from_session(&s),
+                });
+            } else if s.clean_start || s.session_expiry_interval == 0 {
+                // Delete any persisted session for clean start or expired
+                persistence.write(PersistenceOp::DeleteSession {
+                    client_id: client_id.to_string(),
+                });
+            }
         }
 
         // Notify event subscribers

@@ -100,6 +100,8 @@ pub struct Connection<S> {
     pub(crate) packet_rx: mpsc::Receiver<Packet>,
     pub(crate) hooks: Arc<dyn Hooks>,
     pub(crate) metrics: Option<Arc<Metrics>>,
+    /// Persistence manager for durable storage
+    pub(crate) persistence: Option<Arc<crate::persistence::PersistenceManager>>,
     /// Username from CONNECT packet (for ACL checks)
     pub(crate) username: Option<String>,
     /// PROXY protocol info (if connection came through a proxy)
@@ -124,6 +126,7 @@ where
         events: broadcast::Sender<BrokerEvent>,
         hooks: Arc<dyn Hooks>,
         metrics: Option<Arc<Metrics>>,
+        persistence: Option<Arc<crate::persistence::PersistenceManager>>,
     ) -> Self {
         let (packet_tx, packet_rx) = mpsc::channel(config.outbound_channel_capacity);
 
@@ -145,6 +148,7 @@ where
             packet_rx,
             hooks,
             metrics,
+            persistence,
             username: None,
             proxy_info,
         }

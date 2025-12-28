@@ -106,8 +106,8 @@ impl BridgeClient {
         mut command_rx: mpsc::Receiver<BridgeCommand>,
         inbound_callback: Option<InboundCallback>,
     ) {
-        let mut retry_interval = config.reconnect_interval_duration();
-        let max_retry = config.max_reconnect_interval_duration();
+        let mut retry_interval = config.reconnect_interval;
+        let max_retry = config.max_reconnect_interval;
 
         loop {
             *status.write() = RemotePeerStatus::Connecting;
@@ -166,7 +166,7 @@ impl BridgeClient {
 
         // Connect with timeout
         let stream = timeout(
-            config.connect_timeout_duration(),
+            config.connect_timeout,
             TcpStream::connect(format!("{}:{}", host, port)),
         )
         .await
@@ -207,13 +207,10 @@ impl BridgeClient {
 
         // Wait for CONNACK
         let mut read_buf = vec![0u8; 4096];
-        let n = timeout(
-            config.connect_timeout_duration(),
-            read_half.read(&mut read_buf),
-        )
-        .await
-        .map_err(|_| RemoteError::Timeout)?
-        .map_err(|e| RemoteError::ConnectionLost(e.to_string()))?;
+        let n = timeout(config.connect_timeout, read_half.read(&mut read_buf))
+            .await
+            .map_err(|_| RemoteError::Timeout)?
+            .map_err(|e| RemoteError::ConnectionLost(e.to_string()))?;
 
         if n == 0 {
             return Err(RemoteError::ConnectionLost("Connection closed".to_string()));

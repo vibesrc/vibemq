@@ -69,7 +69,7 @@ impl ClusterManager {
         // Configure failure detector
         let failure_detector_config = FailureDetectorConfig {
             phi_threshold: 8.0,
-            initial_interval: config.gossip_interval_duration(),
+            initial_interval: config.gossip_interval,
             ..Default::default()
         };
 
@@ -77,11 +77,11 @@ impl ClusterManager {
         let chitchat_config = ChitchatConfig {
             chitchat_id: chitchat_id.clone(),
             cluster_id: "vibemq".to_string(),
-            gossip_interval: config.gossip_interval_duration(),
+            gossip_interval: config.gossip_interval,
             listen_addr: config.gossip_addr, // Bind address (0.0.0.0 is fine)
             seed_nodes,
             failure_detector_config,
-            marked_for_deletion_grace_period: config.dead_node_grace_period_duration(),
+            marked_for_deletion_grace_period: config.dead_node_grace_period,
             catchup_callback: None,
             extra_liveness_predicate: None,
         };
@@ -278,7 +278,7 @@ impl ClusterManager {
                         let effective_addr = if proxy_config.enabled {
                             match parse_proxy_header(
                                 &mut stream,
-                                proxy_config.timeout_duration(),
+                                proxy_config.timeout,
                                 proxy_config.tls_termination,
                             )
                             .await
@@ -456,7 +456,7 @@ impl ClusterManager {
         let mut known_nodes: HashSet<String> = HashSet::new();
 
         loop {
-            tokio::time::sleep(config.gossip_interval_duration()).await;
+            tokio::time::sleep(config.gossip_interval).await;
 
             // Get current cluster state
             let cluster_state = {

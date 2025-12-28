@@ -18,6 +18,8 @@ use config::{Environment, File, FileFormat};
 use regex::Regex;
 use serde::Deserialize;
 
+use crate::flapping::{ConnectionLimitConfig, FlappingConfig};
+
 // Re-export bridge config types
 pub use bridge::{
     BridgeConfig, BridgeProtocol, BridgeTlsConfig, ForwardDirection, ForwardRule, LoopPrevention,
@@ -32,9 +34,13 @@ pub use metrics::MetricsConfig;
 // Re-export proxy protocol config types
 pub use proxy::ProxyProtocolConfig;
 
+// Re-export persistence config types
+pub use persistence::{BackendType, PersistenceConfig};
+
 mod bridge;
 mod cluster;
 mod metrics;
+mod persistence;
 mod proxy;
 
 /// Substitute environment variables in a string.
@@ -124,6 +130,9 @@ pub struct Config {
     /// Metrics configuration
     #[serde(default)]
     pub metrics: MetricsConfig,
+    /// Persistence configuration
+    #[serde(default)]
+    pub persistence: PersistenceConfig,
 }
 
 /// Logging configuration
@@ -235,9 +244,9 @@ pub struct LimitsConfig {
     /// Maximum pending PUBREL for QoS 2
     #[serde(default = "default_max_awaiting_rel")]
     pub max_awaiting_rel: usize,
-    /// Seconds before retrying unacked messages
-    #[serde(default = "default_retry_interval")]
-    pub retry_interval: u64,
+    /// Retry interval for unacked messages (e.g., "30s", "1m")
+    #[serde(default = "default_retry_interval", with = "humantime_serde")]
+    pub retry_interval: Duration,
     /// Per-connection outbound message channel capacity.
     /// This buffer holds messages waiting to be written to the client socket.
     /// Higher values handle burst traffic better but use more memory per connection.
@@ -249,6 +258,12 @@ pub struct LimitsConfig {
     /// Set to 0 for unlimited (default).
     #[serde(default)]
     pub max_topic_levels: usize,
+    /// Flapping detection configuration (DoS protection)
+    #[serde(default)]
+    pub flapping_detect: FlappingConfig,
+    /// Connection rate limiting configuration (DoS protection)
+    #[serde(default)]
+    pub connection_limit: ConnectionLimitConfig,
 }
 
 fn default_max_connections() -> usize {
@@ -266,8 +281,8 @@ fn default_max_queued_messages() -> usize {
 fn default_max_awaiting_rel() -> usize {
     100
 }
-fn default_retry_interval() -> u64 {
-    30
+fn default_retry_interval() -> Duration {
+    Duration::from_secs(30)
 }
 fn default_outbound_channel_capacity() -> usize {
     1024
@@ -281,17 +296,12 @@ impl Default for LimitsConfig {
             max_inflight: default_max_inflight(),
             max_queued_messages: default_max_queued_messages(),
             max_awaiting_rel: default_max_awaiting_rel(),
-            retry_interval: default_retry_interval(),
+            retry_interval: Duration::from_secs(30),
             outbound_channel_capacity: default_outbound_channel_capacity(),
             max_topic_levels: 0, // 0 = unlimited
+            flapping_detect: FlappingConfig::default(),
+            connection_limit: ConnectionLimitConfig::default(),
         }
-    }
-}
-
-impl LimitsConfig {
-    /// Get retry interval as Duration
-    pub fn retry_interval_duration(&self) -> Duration {
-        Duration::from_secs(self.retry_interval)
     }
 }
 
@@ -305,9 +315,9 @@ pub struct SessionConfig {
     /// Maximum keep alive in seconds
     #[serde(default = "default_max_keep_alive")]
     pub max_keep_alive: u16,
-    /// Session expiry check interval in seconds
-    #[serde(default = "default_expiry_check_interval")]
-    pub expiry_check_interval: u64,
+    /// Session expiry check interval (e.g., "60s", "1m")
+    #[serde(default = "default_expiry_check_interval", with = "humantime_serde")]
+    pub expiry_check_interval: Duration,
     /// Maximum topic aliases
     #[serde(default = "default_max_topic_aliases")]
     pub max_topic_aliases: u16,
@@ -319,8 +329,8 @@ fn default_keep_alive() -> u16 {
 fn default_max_keep_alive() -> u16 {
     65535
 }
-fn default_expiry_check_interval() -> u64 {
-    60
+fn default_expiry_check_interval() -> Duration {
+    Duration::from_secs(60)
 }
 fn default_max_topic_aliases() -> u16 {
     65535
@@ -331,16 +341,9 @@ impl Default for SessionConfig {
         Self {
             default_keep_alive: default_keep_alive(),
             max_keep_alive: default_max_keep_alive(),
-            expiry_check_interval: default_expiry_check_interval(),
+            expiry_check_interval: Duration::from_secs(60),
             max_topic_aliases: default_max_topic_aliases(),
         }
-    }
-}
-
-impl SessionConfig {
-    /// Get expiry check interval as Duration
-    pub fn expiry_check_interval_duration(&self) -> Duration {
-        Duration::from_secs(self.expiry_check_interval)
     }
 }
 
@@ -366,9 +369,9 @@ pub struct MqttConfig {
     /// Whether $SYS topics are published
     #[serde(default = "default_true")]
     pub sys_topics: bool,
-    /// $SYS topic publish interval in seconds
-    #[serde(default = "default_sys_interval")]
-    pub sys_interval: u64,
+    /// $SYS topic publish interval (e.g., "10s", "1m")
+    #[serde(default = "default_sys_interval", with = "humantime_serde")]
+    pub sys_interval: Duration,
 }
 
 fn default_max_qos() -> u8 {
@@ -377,8 +380,8 @@ fn default_max_qos() -> u8 {
 fn default_true() -> bool {
     true
 }
-fn default_sys_interval() -> u64 {
-    10
+fn default_sys_interval() -> Duration {
+    Duration::from_secs(10)
 }
 
 impl Default for MqttConfig {
@@ -390,7 +393,7 @@ impl Default for MqttConfig {
             subscription_identifiers: true,
             shared_subscriptions: true,
             sys_topics: true,
-            sys_interval: default_sys_interval(),
+            sys_interval: Duration::from_secs(10),
         }
     }
 }
@@ -483,18 +486,19 @@ impl Config {
             .set_default("limits.max_inflight", 32)?
             .set_default("limits.max_queued_messages", 1000)?
             .set_default("limits.max_awaiting_rel", 100)?
-            .set_default("limits.retry_interval", 30)?
+            .set_default("limits.retry_interval", "30s")?
             .set_default("limits.outbound_channel_capacity", 1024)?
             .set_default("limits.max_topic_levels", 0)?
             .set_default("session.default_keep_alive", 60)?
             .set_default("session.max_keep_alive", 65535)?
-            .set_default("session.expiry_check_interval", 60)?
+            .set_default("session.expiry_check_interval", "60s")?
             .set_default("session.max_topic_aliases", 65535)?
             .set_default("mqtt.max_qos", 2)?
             .set_default("mqtt.retain_available", true)?
             .set_default("mqtt.wildcard_subscriptions", true)?
             .set_default("mqtt.subscription_identifiers", true)?
             .set_default("mqtt.shared_subscriptions", true)?
+            .set_default("mqtt.sys_interval", "10s")?
             .set_default("auth.enabled", false)?
             .set_default("auth.allow_anonymous", true)?
             .set_default("acl.enabled", false)?;

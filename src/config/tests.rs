@@ -104,12 +104,12 @@ max_packet_size = 1048576
 max_inflight = 16
 max_queued_messages = 500
 max_awaiting_rel = 50
-retry_interval = 20
+retry_interval = "20s"
 
 [session]
 default_keep_alive = 30
 max_keep_alive = 300
-expiry_check_interval = 30
+expiry_check_interval = "30s"
 max_topic_aliases = 100
 
 [mqtt]
@@ -118,6 +118,7 @@ retain_available = true
 wildcard_subscriptions = true
 subscription_identifiers = true
 shared_subscriptions = false
+sys_interval = "10s"
 
 [auth]
 enabled = true

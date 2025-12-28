@@ -30,8 +30,10 @@ const TCP_BACKLOG: i32 = 4096;
 use crate::bridge::BridgeManager;
 use crate::cluster::ClusterManager;
 use crate::config::ProxyProtocolConfig;
+use crate::flapping::FlappingDetector;
 use crate::hooks::{DefaultHooks, Hooks};
 use crate::metrics::Metrics;
+use crate::persistence::{PersistenceManager, PersistenceOp, StoredRetainedMessage};
 use crate::protocol::{Packet, Properties, ProtocolVersion, Publish, QoS};
 use crate::proxy::{parse_proxy_header, ProxyInfo};
 use crate::session::SessionStore;
@@ -222,6 +224,10 @@ pub struct Broker {
     cluster_manager: Option<Arc<ClusterManager>>,
     /// Metrics for observability
     metrics: Option<Arc<Metrics>>,
+    /// Persistence manager for durable storage
+    persistence: Option<Arc<PersistenceManager>>,
+    /// Flapping detector for DoS protection
+    flapping_detector: Option<Arc<FlappingDetector>>,
 }
 
 impl Broker {
@@ -247,7 +253,29 @@ impl Broker {
             bridge_manager: None,
             cluster_manager: None,
             metrics: None,
+            persistence: None,
+            flapping_detector: None,
         }
+    }
+
+    /// Set flapping detector for DoS protection
+    pub fn set_flapping_detector(&mut self, detector: FlappingDetector) {
+        self.flapping_detector = Some(Arc::new(detector));
+    }
+
+    /// Get flapping detector (if enabled)
+    pub fn flapping_detector(&self) -> Option<&Arc<FlappingDetector>> {
+        self.flapping_detector.as_ref()
+    }
+
+    /// Set persistence manager for this broker
+    pub fn set_persistence(&mut self, persistence: Arc<PersistenceManager>) {
+        self.persistence = Some(persistence);
+    }
+
+    /// Get persistence manager (if enabled)
+    pub fn persistence(&self) -> Option<&Arc<PersistenceManager>> {
+        self.persistence.as_ref()
     }
 
     /// Set metrics for this broker
@@ -274,6 +302,8 @@ impl Broker {
             bridge_manager: None,
             cluster_manager: None,
             metrics: None,
+            persistence: self.persistence.clone(),
+            flapping_detector: None,
         }
     }
 
@@ -296,6 +326,7 @@ impl Broker {
         let sessions = self.sessions.clone();
         let subscriptions = self.subscriptions.clone();
         let connections = self.connections.clone();
+        let persistence = self.persistence.clone();
 
         // Callback for messages received from cluster peers
         let inbound_callback = Arc::new(
@@ -320,17 +351,26 @@ impl Broker {
                 if retain {
                     if payload.is_empty() {
                         retained.remove(&topic);
-                    } else {
-                        retained.insert(
-                            topic.clone(),
-                            RetainedMessage {
+                        if let Some(ref persistence) = persistence {
+                            persistence.write(PersistenceOp::DeleteRetained {
                                 topic: topic.clone(),
-                                payload,
-                                qos,
-                                properties: Properties::default(),
-                                timestamp: Instant::now(),
-                            },
-                        );
+                            });
+                        }
+                    } else {
+                        let retained_msg = RetainedMessage {
+                            topic: topic.clone(),
+                            payload,
+                            qos,
+                            properties: Properties::default(),
+                            timestamp: Instant::now(),
+                        };
+                        retained.insert(topic.clone(), retained_msg.clone());
+                        if let Some(ref persistence) = persistence {
+                            persistence.write(PersistenceOp::SetRetained {
+                                topic: topic.clone(),
+                                message: StoredRetainedMessage::from(&retained_msg),
+                            });
+                        }
                     }
                 }
 
@@ -398,6 +438,7 @@ impl Broker {
         let sessions = self.sessions.clone();
         let subscriptions = self.subscriptions.clone();
         let connections = self.connections.clone();
+        let persistence = self.persistence.clone();
 
         let inbound_callback = Arc::new(
             move |topic: String, payload: Bytes, qos: QoS, retain: bool| {
@@ -416,17 +457,26 @@ impl Broker {
                 if retain {
                     if payload.is_empty() {
                         retained.remove(&topic);
-                    } else {
-                        retained.insert(
-                            topic.clone(),
-                            RetainedMessage {
+                        if let Some(ref persistence) = persistence {
+                            persistence.write(PersistenceOp::DeleteRetained {
                                 topic: topic.clone(),
-                                payload,
-                                qos,
-                                properties: Properties::default(),
-                                timestamp: Instant::now(),
-                            },
-                        );
+                            });
+                        }
+                    } else {
+                        let retained_msg = RetainedMessage {
+                            topic: topic.clone(),
+                            payload,
+                            qos,
+                            properties: Properties::default(),
+                            timestamp: Instant::now(),
+                        };
+                        retained.insert(topic.clone(), retained_msg.clone());
+                        if let Some(ref persistence) = persistence {
+                            persistence.write(PersistenceOp::SetRetained {
+                                topic: topic.clone(),
+                                message: StoredRetainedMessage::from(&retained_msg),
+                            });
+                        }
                     }
                 }
 
@@ -496,6 +546,8 @@ impl Broker {
             let shutdown = self.shutdown.clone();
             let hooks = self.hooks.clone();
             let metrics = self.metrics.clone();
+            let persistence = self.persistence.clone();
+            let flapping_detector = self.flapping_detector.clone();
 
             tokio::spawn(async move {
                 loop {
@@ -510,6 +562,8 @@ impl Broker {
                             let events = events.clone();
                             let hooks = hooks.clone();
                             let metrics = metrics.clone();
+                            let persistence = persistence.clone();
+                            let flapping_detector = flapping_detector.clone();
                             let mut shutdown_rx = shutdown.subscribe();
 
                             tokio::spawn(async move {
@@ -518,7 +572,7 @@ impl Broker {
                                     if config.ws_proxy_protocol.enabled {
                                         match parse_proxy_header(
                                             &mut stream,
-                                            config.ws_proxy_protocol.timeout_duration(),
+                                            config.ws_proxy_protocol.timeout,
                                             config.ws_proxy_protocol.tls_termination,
                                         )
                                         .await
@@ -539,6 +593,19 @@ impl Broker {
                                         (addr, None)
                                     };
 
+                                // Check flapping/rate limits before WebSocket handshake
+                                let client_ip = effective_addr.ip();
+                                if let Some(ref detector) = flapping_detector {
+                                    if let Err(reason) = detector.check_connection(client_ip) {
+                                        debug!(
+                                            "Rejecting WebSocket connection from {}: {:?}",
+                                            client_ip, reason
+                                        );
+                                        return;
+                                    }
+                                    detector.record_connection(client_ip);
+                                }
+
                                 // Perform WebSocket handshake with path validation
                                 match WsStream::accept_with_path(stream, &config.ws_path).await {
                                     Ok(ws_stream) => {
@@ -558,6 +625,7 @@ impl Broker {
                                             events,
                                             hooks,
                                             metrics,
+                                            persistence,
                                         );
 
                                         {
@@ -587,12 +655,21 @@ impl Broker {
 
                                         // Return buffers to the pool for reuse
                                         conn.return_buffers();
+
+                                        // Track disconnection for flapping detection
+                                        if let Some(ref detector) = flapping_detector {
+                                            detector.record_disconnection(effective_addr.ip());
+                                        }
                                     }
                                     Err(e) => {
                                         debug!(
                                             "WebSocket handshake failed for {}: {}",
                                             effective_addr, e
                                         );
+                                        // Track disconnection even on handshake failure
+                                        if let Some(ref detector) = flapping_detector {
+                                            detector.record_disconnection(effective_addr.ip());
+                                        }
                                     }
                                 }
                             });
@@ -632,6 +709,8 @@ impl Broker {
             let shutdown = self.shutdown.clone();
             let hooks = self.hooks.clone();
             let metrics = self.metrics.clone();
+            let persistence = self.persistence.clone();
+            let flapping_detector = self.flapping_detector.clone();
 
             tokio::spawn(async move {
                 loop {
@@ -647,6 +726,8 @@ impl Broker {
                             let hooks = hooks.clone();
                             let metrics = metrics.clone();
                             let tls_acceptor = tls_acceptor.clone();
+                            let persistence = persistence.clone();
+                            let flapping_detector = flapping_detector.clone();
                             let mut shutdown_rx = shutdown.subscribe();
 
                             tokio::spawn(async move {
@@ -655,7 +736,7 @@ impl Broker {
                                     if config.tls_proxy_protocol.enabled {
                                         match parse_proxy_header(
                                             &mut stream,
-                                            config.tls_proxy_protocol.timeout_duration(),
+                                            config.tls_proxy_protocol.timeout,
                                             config.tls_proxy_protocol.tls_termination,
                                         )
                                         .await
@@ -676,6 +757,19 @@ impl Broker {
                                         (addr, None)
                                     };
 
+                                // Check flapping/rate limits before TLS handshake
+                                let client_ip = effective_addr.ip();
+                                if let Some(ref detector) = flapping_detector {
+                                    if let Err(reason) = detector.check_connection(client_ip) {
+                                        debug!(
+                                            "Rejecting TLS connection from {}: {:?}",
+                                            client_ip, reason
+                                        );
+                                        return;
+                                    }
+                                    detector.record_connection(client_ip);
+                                }
+
                                 // Perform TLS handshake
                                 match tls_acceptor.accept(stream).await {
                                     Ok(tls_stream) => {
@@ -692,6 +786,7 @@ impl Broker {
                                             events,
                                             hooks,
                                             metrics,
+                                            persistence,
                                         );
 
                                         {
@@ -721,12 +816,21 @@ impl Broker {
 
                                         // Return buffers to the pool for reuse
                                         conn.return_buffers();
+
+                                        // Track disconnection for flapping detection
+                                        if let Some(ref detector) = flapping_detector {
+                                            detector.record_disconnection(effective_addr.ip());
+                                        }
                                     }
                                     Err(e) => {
                                         debug!(
                                             "TLS handshake failed for {}: {}",
                                             effective_addr, e
                                         );
+                                        // Track disconnection even on handshake failure
+                                        if let Some(ref detector) = flapping_detector {
+                                            detector.record_disconnection(effective_addr.ip());
+                                        }
                                     }
                                 }
                             });
@@ -762,6 +866,33 @@ impl Broker {
                 }
             }
         });
+
+        // Spawn flapping detector cleanup task if enabled
+        if let Some(ref detector) = self.flapping_detector {
+            let detector = detector.clone();
+            let interval = detector.cleanup_interval();
+            let mut shutdown_rx = self.shutdown.subscribe();
+
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(interval);
+                loop {
+                    tokio::select! {
+                        biased;
+
+                        _ = ticker.tick() => {
+                            detector.cleanup();
+                        }
+                        result = shutdown_rx.recv() => {
+                            match result {
+                                Ok(()) => break,
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         // Spawn bridge forwarding task if bridges are configured
         if let Some(ref bridge_manager) = self.bridge_manager {
@@ -969,7 +1100,9 @@ impl Broker {
         let events = self.events.clone();
         let hooks = self.hooks.clone();
         let metrics = self.metrics.clone();
+        let persistence = self.persistence.clone();
         let shutdown = self.shutdown.clone();
+        let flapping_detector = self.flapping_detector.clone();
 
         tokio::spawn(async move {
             debug!("Starting TCP accept loop");
@@ -982,7 +1115,7 @@ impl Broker {
                         let (effective_addr, proxy_info) = if config.proxy_protocol.enabled {
                             match parse_proxy_header(
                                 &mut stream,
-                                config.proxy_protocol.timeout_duration(),
+                                config.proxy_protocol.timeout,
                                 config.proxy_protocol.tls_termination,
                             )
                             .await
@@ -1003,6 +1136,17 @@ impl Broker {
                             (addr, None)
                         };
 
+                        // Check flapping/rate limits before spawning handler
+                        let client_ip = effective_addr.ip();
+                        if let Some(ref detector) = flapping_detector {
+                            if let Err(reason) = detector.check_connection(client_ip) {
+                                debug!("Rejecting TCP connection from {}: {:?}", client_ip, reason);
+                                drop(stream);
+                                continue;
+                            }
+                            detector.record_connection(client_ip);
+                        }
+
                         spawn_connection_handler(
                             stream,
                             effective_addr,
@@ -1015,7 +1159,9 @@ impl Broker {
                             events.clone(),
                             hooks.clone(),
                             metrics.clone(),
+                            persistence.clone(),
                             shutdown.clone(),
+                            flapping_detector.clone(),
                         );
                     }
                     Err(e) => {
@@ -1051,6 +1197,11 @@ impl Broker {
         self.retained.len()
     }
 
+    /// Get access to retained messages for loading from persistence
+    pub fn retained(&self) -> &Arc<DashMap<String, RetainedMessage>> {
+        &self.retained
+    }
+
     /// Publish a message from the server
     pub fn publish(&self, topic: String, payload: Bytes, qos: QoS, retain: bool) {
         // Create a publish packet
@@ -1068,17 +1219,26 @@ impl Broker {
         if retain {
             if payload.is_empty() {
                 self.retained.remove(&topic);
-            } else {
-                self.retained.insert(
-                    topic.clone(),
-                    RetainedMessage {
+                if let Some(ref persistence) = self.persistence {
+                    persistence.write(PersistenceOp::DeleteRetained {
                         topic: topic.clone(),
-                        payload,
-                        qos,
-                        properties: Properties::default(),
-                        timestamp: Instant::now(),
-                    },
-                );
+                    });
+                }
+            } else {
+                let retained_msg = RetainedMessage {
+                    topic: topic.clone(),
+                    payload,
+                    qos,
+                    properties: Properties::default(),
+                    timestamp: Instant::now(),
+                };
+                self.retained.insert(topic.clone(), retained_msg.clone());
+                if let Some(ref persistence) = self.persistence {
+                    persistence.write(PersistenceOp::SetRetained {
+                        topic: topic.clone(),
+                        message: StoredRetainedMessage::from(&retained_msg),
+                    });
+                }
             }
         }
 
@@ -1141,7 +1301,9 @@ fn spawn_connection_handler(
     events: broadcast::Sender<BrokerEvent>,
     hooks: Arc<dyn Hooks>,
     metrics: Option<Arc<Metrics>>,
+    persistence: Option<Arc<crate::persistence::PersistenceManager>>,
     shutdown: broadcast::Sender<()>,
+    flapping_detector: Option<Arc<FlappingDetector>>,
 ) {
     let mut shutdown_rx = shutdown.subscribe();
 
@@ -1158,6 +1320,7 @@ fn spawn_connection_handler(
             events,
             hooks,
             metrics,
+            persistence,
         );
 
         // Pin the connection future so we can poll it repeatedly
@@ -1197,6 +1360,11 @@ fn spawn_connection_handler(
 
         // Return buffers to the pool for reuse
         conn.return_buffers();
+
+        // Track disconnection for flapping detection
+        if let Some(ref detector) = flapping_detector {
+            detector.record_disconnection(addr.ip());
+        }
     });
 }
 

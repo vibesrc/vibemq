@@ -42,20 +42,20 @@ pub struct ClusterConfig {
     #[serde(default)]
     pub seeds: Vec<String>,
 
-    /// Gossip interval in seconds
-    /// Default: 1
-    #[serde(default = "default_gossip_interval")]
-    pub gossip_interval: u64,
+    /// Gossip interval (e.g., "1s", "500ms")
+    /// Default: 1s
+    #[serde(default = "default_gossip_interval", with = "humantime_serde")]
+    pub gossip_interval: Duration,
 
-    /// Node failure detection timeout in seconds
-    /// Default: 5
-    #[serde(default = "default_failure_timeout")]
-    pub failure_timeout: u64,
+    /// Node failure detection timeout (e.g., "5s", "10s")
+    /// Default: 5s
+    #[serde(default = "default_failure_timeout", with = "humantime_serde")]
+    pub failure_timeout: Duration,
 
-    /// Dead node grace period in seconds before removal
-    /// Default: 30
-    #[serde(default = "default_dead_node_grace_period")]
-    pub dead_node_grace_period: u64,
+    /// Dead node grace period before removal (e.g., "30s", "1m")
+    /// Default: 30s
+    #[serde(default = "default_dead_node_grace_period", with = "humantime_serde")]
+    pub dead_node_grace_period: Duration,
 
     /// PROXY protocol configuration for peer listener
     #[serde(default)]
@@ -70,16 +70,16 @@ fn default_peer_addr() -> SocketAddr {
     "0.0.0.0:7947".parse().unwrap()
 }
 
-fn default_gossip_interval() -> u64 {
-    1
+fn default_gossip_interval() -> Duration {
+    Duration::from_secs(1)
 }
 
-fn default_failure_timeout() -> u64 {
-    5
+fn default_failure_timeout() -> Duration {
+    Duration::from_secs(5)
 }
 
-fn default_dead_node_grace_period() -> u64 {
-    30
+fn default_dead_node_grace_period() -> Duration {
+    Duration::from_secs(30)
 }
 
 impl Default for ClusterConfig {
@@ -92,9 +92,9 @@ impl Default for ClusterConfig {
             peer_addr: default_peer_addr(),
             peer_advertise_addr: None,
             seeds: Vec::new(),
-            gossip_interval: default_gossip_interval(),
-            failure_timeout: default_failure_timeout(),
-            dead_node_grace_period: default_dead_node_grace_period(),
+            gossip_interval: Duration::from_secs(1),
+            failure_timeout: Duration::from_secs(5),
+            dead_node_grace_period: Duration::from_secs(30),
             proxy_protocol: ProxyProtocolConfig::default(),
         }
     }
@@ -140,21 +140,6 @@ impl ClusterConfig {
 
         // Fallback to bind address
         self.peer_addr
-    }
-
-    /// Get gossip interval as Duration
-    pub fn gossip_interval_duration(&self) -> Duration {
-        Duration::from_secs(self.gossip_interval)
-    }
-
-    /// Get failure timeout as Duration
-    pub fn failure_timeout_duration(&self) -> Duration {
-        Duration::from_secs(self.failure_timeout)
-    }
-
-    /// Get dead node grace period as Duration
-    pub fn dead_node_grace_period_duration(&self) -> Duration {
-        Duration::from_secs(self.dead_node_grace_period)
     }
 }
 
@@ -212,17 +197,10 @@ mod tests {
     }
 
     #[test]
-    fn test_duration_conversions() {
-        let mut config = ClusterConfig::default();
-        config.gossip_interval = 2;
-        config.failure_timeout = 10;
-        config.dead_node_grace_period = 60;
-
-        assert_eq!(config.gossip_interval_duration(), Duration::from_secs(2));
-        assert_eq!(config.failure_timeout_duration(), Duration::from_secs(10));
-        assert_eq!(
-            config.dead_node_grace_period_duration(),
-            Duration::from_secs(60)
-        );
+    fn test_duration_defaults() {
+        let config = ClusterConfig::default();
+        assert_eq!(config.gossip_interval, Duration::from_secs(1));
+        assert_eq!(config.failure_timeout, Duration::from_secs(5));
+        assert_eq!(config.dead_node_grace_period, Duration::from_secs(30));
     }
 }

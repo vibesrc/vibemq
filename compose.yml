@@ -4,6 +4,8 @@ services:
     build: .
     ports:
       - 1883:1883
+    volumes:
+      - vibemq_data:/var/lib/vibemq
     environment:
       # yolo mode: 0 = unbounded for all limits
       - VIBEMQ__LIMITS__MAX_CONNECTIONS=10000
@@ -29,3 +31,6 @@ services:
         reservations:
           cpus: "4"
           memory: 8G
+
+volumes:
+  vibemq_data:

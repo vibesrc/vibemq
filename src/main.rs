@@ -26,7 +26,7 @@ pub static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::Instant;
 
 use clap::{Parser, ValueEnum};
 use tracing::{info, Level};
@@ -34,10 +34,11 @@ use tracing_subscriber::FmtSubscriber;
 
 use vibemq::acl::AclProvider;
 use vibemq::auth::AuthProvider;
-use vibemq::broker::{Broker, BrokerConfig, TlsConfig};
+use vibemq::broker::{Broker, BrokerConfig, RetainedMessage, TlsConfig};
 use vibemq::config::Config;
 use vibemq::hooks::CompositeHooks;
-use vibemq::protocol::QoS;
+use vibemq::persistence::{FjallBackend, PersistenceManager};
+use vibemq::protocol::{Properties, QoS};
 
 /// Log level for CLI
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
@@ -256,9 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_packet_size,
         default_keep_alive: keep_alive,
         max_keep_alive,
-        session_expiry_check_interval: Duration::from_secs(
-            file_config.session.expiry_check_interval,
-        ),
+        session_expiry_check_interval: file_config.session.expiry_check_interval,
         receive_maximum,
         max_qos,
         retain_available,
@@ -268,7 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_topic_alias,
         num_workers,
         sys_topics_enabled: file_config.mqtt.sys_topics,
-        sys_topics_interval: Duration::from_secs(file_config.mqtt.sys_interval),
+        sys_topics_interval: file_config.mqtt.sys_interval,
         // 0 = unbounded for all limits
         max_inflight: if file_config.limits.max_inflight == 0 {
             u16::MAX
@@ -285,7 +284,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             file_config.limits.max_awaiting_rel
         },
-        retry_interval: file_config.limits.retry_interval_duration(),
+        retry_interval: file_config.limits.retry_interval,
         outbound_channel_capacity: if file_config.limits.outbound_channel_capacity == 0 {
             // tokio mpsc channel max is ~2^61, use a large but safe value
             1_000_000
@@ -379,6 +378,87 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create broker with hooks
     let mut broker = Broker::with_hooks(broker_config, hooks);
+
+    // Initialize persistence if enabled
+    let persistence_manager = if file_config.persistence.enabled {
+        info!(
+            "  Persistence: enabled ({:?})",
+            file_config.persistence.path
+        );
+
+        // Open the fjall backend
+        let backend = match FjallBackend::open(&file_config.persistence.path) {
+            Ok(b) => Arc::new(b),
+            Err(e) => {
+                eprintln!("Error opening persistence backend: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        // Create the persistence manager
+        let manager = Arc::new(PersistenceManager::new(
+            backend,
+            file_config.persistence.flush_interval,
+            file_config.persistence.max_batch_size,
+        ));
+
+        // Load existing data
+        let loaded = match manager.load_all().await {
+            Ok(data) => data,
+            Err(e) => {
+                eprintln!("Error loading persistence data: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        info!(
+            "  Loaded: {} retained messages, {} sessions",
+            loaded.retained.len(),
+            loaded.sessions.len()
+        );
+
+        // Restore retained messages
+        for (topic, stored) in loaded.retained {
+            let msg = RetainedMessage {
+                topic: topic.clone(),
+                payload: bytes::Bytes::from(stored.payload),
+                qos: QoS::from_u8(stored.qos).unwrap_or_default(),
+                properties: Properties::from(stored.properties),
+                timestamp: Instant::now(), // Approximate - original timestamp lost
+            };
+            broker.retained().insert(topic, msg);
+        }
+
+        // TODO: Restore sessions when session store supports it
+        // For now, sessions will be recreated on client reconnect
+
+        // Set persistence on broker
+        broker.set_persistence(manager.clone());
+
+        Some(manager)
+    } else {
+        info!("  Persistence: disabled");
+        None
+    };
+
+    // Setup flapping detection if enabled
+    if file_config.limits.flapping_detect.enabled
+        || file_config.limits.connection_limit.max_connections_per_ip > 0
+    {
+        info!(
+            "  DoS protection: flapping={}, max_per_ip={}, rate_limit={}/s",
+            file_config.limits.flapping_detect.enabled,
+            file_config.limits.connection_limit.max_connections_per_ip,
+            file_config.limits.connection_limit.rate_limit
+        );
+        let detector = vibemq::FlappingDetector::new(
+            file_config.limits.flapping_detect.clone(),
+            file_config.limits.connection_limit.clone(),
+        );
+        broker.set_flapping_detector(detector);
+    } else {
+        info!("  DoS protection: disabled");
+    }
 
     // Setup bridges if configured
     let enabled_bridges = file_config.bridge.iter().filter(|b| b.enabled).count();
@@ -486,6 +566,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run the broker (it handles Ctrl+C internally via the shutdown signal)
     let result = broker.run().await;
+
+    // Shutdown persistence (flush pending writes)
+    if let Some(persistence) = persistence_manager {
+        info!("Flushing persistence...");
+        if let Err(e) = persistence.shutdown().await {
+            tracing::error!("Error during persistence shutdown: {}", e);
+        }
+    }
 
     // Dump profiles on shutdown if continuous profiling was enabled (always, even on error)
     #[cfg(feature = "pprof")]
