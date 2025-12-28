@@ -69,7 +69,7 @@ retry_interval = 30
 outbound_channel_capacity = 1024
 # Maximum topic levels (depth) allowed (default: 0 = unlimited)
 # Topic levels are separated by '/'. For example, "a/b/c" has 3 levels.
-# max_topic_levels = 128
+max_topic_levels = 32
 
 [metrics]
 enabled = true
@@ -99,6 +99,24 @@ shared_subscriptions = true
 sys_topics = true
 # $SYS topic publish interval in seconds
 sys_interval = 10
+
+# Persistence configuration
+# Enables persistence of retained messages and sessions across broker restarts
+
+# [persistence]
+# enabled = true                    # Enable persistence (default: true)
+# backend = "fjall"                 # Storage backend: "fjall" (embedded LSM-tree)
+# path = "/var/lib/vibemq"          # Data directory (default: "./data")
+# flush_interval_ms = 100           # Batch flush interval in milliseconds
+# max_batch_size = 100              # Max operations before forced flush
+
+# Data persisted:
+# - Retained messages (on publish with retain=true)
+# - Sessions with expiry > 0 (on client disconnect)
+# - Inflight QoS 1/2 messages (for message recovery)
+#
+# Note: Writes are fire-and-forget (non-blocking) and batched for performance.
+# On shutdown, pending writes are flushed before the broker exits.
 
 # Authentication configuration
 [auth]

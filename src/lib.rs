@@ -13,6 +13,7 @@ pub mod codec;
 pub mod config;
 pub mod hooks;
 pub mod metrics;
+pub mod persistence;
 #[cfg(feature = "pprof")]
 pub mod profiling;
 pub mod protocol;
@@ -30,5 +31,6 @@ pub use cluster::{ClusterConfig, ClusterManager};
 pub use config::Config;
 pub use hooks::{CompositeHooks, DefaultHooks, Hooks};
 pub use metrics::{Metrics, MetricsServer};
+pub use persistence::{FjallBackend, PersistenceManager, StorageBackend};
 pub use protocol::{ProtocolVersion, QoS};
 pub use remote::{RemoteError, RemotePeer, RemotePeerStatus};

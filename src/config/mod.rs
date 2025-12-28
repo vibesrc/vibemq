@@ -32,9 +32,13 @@ pub use metrics::MetricsConfig;
 // Re-export proxy protocol config types
 pub use proxy::ProxyProtocolConfig;
 
+// Re-export persistence config types
+pub use persistence::{BackendType, PersistenceConfig};
+
 mod bridge;
 mod cluster;
 mod metrics;
+mod persistence;
 mod proxy;
 
 /// Substitute environment variables in a string.
@@ -124,6 +128,9 @@ pub struct Config {
     /// Metrics configuration
     #[serde(default)]
     pub metrics: MetricsConfig,
+    /// Persistence configuration
+    #[serde(default)]
+    pub persistence: PersistenceConfig,
 }
 
 /// Logging configuration
