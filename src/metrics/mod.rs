@@ -62,6 +62,11 @@ pub struct Metrics {
     // Performance metrics
     pub publish_latency: Histogram,
     pub connect_duration: Histogram,
+
+    // DoS protection metrics
+    pub connections_rejected_total: IntCounterVec,
+    pub ips_banned_current: IntGauge,
+    pub ips_tracked_current: IntGauge,
 }
 
 impl Metrics {
@@ -259,6 +264,28 @@ impl Metrics {
         )
         .unwrap();
 
+        // DoS protection metrics
+        let connections_rejected_total = IntCounterVec::new(
+            Opts::new(
+                "vibemq_connections_rejected_total",
+                "Total connections rejected by DoS protection",
+            ),
+            &["reason"],
+        )
+        .unwrap();
+
+        let ips_banned_current = IntGauge::with_opts(Opts::new(
+            "vibemq_ips_banned_current",
+            "Current number of IPs banned by flapping detection",
+        ))
+        .unwrap();
+
+        let ips_tracked_current = IntGauge::with_opts(Opts::new(
+            "vibemq_ips_tracked_current",
+            "Current number of IPs being tracked for rate limiting",
+        ))
+        .unwrap();
+
         // Register all metrics
         registry
             .register(Box::new(connections_total.clone()))
@@ -341,6 +368,15 @@ impl Metrics {
         registry
             .register(Box::new(connect_duration.clone()))
             .unwrap();
+        registry
+            .register(Box::new(connections_rejected_total.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(ips_banned_current.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(ips_tracked_current.clone()))
+            .unwrap();
 
         Metrics {
             registry,
@@ -371,6 +407,9 @@ impl Metrics {
             cluster_messages_received,
             publish_latency,
             connect_duration,
+            connections_rejected_total,
+            ips_banned_current,
+            ips_tracked_current,
         }
     }
 
@@ -479,6 +518,19 @@ impl Metrics {
 
     pub fn session_expired(&self) {
         self.sessions_expired_total.inc();
+    }
+
+    // DoS protection helpers
+
+    pub fn connection_rejected(&self, reason: &str) {
+        self.connections_rejected_total
+            .with_label_values(&[reason])
+            .inc();
+    }
+
+    pub fn update_flapping_stats(&self, banned_ips: usize, tracked_ips: usize) {
+        self.ips_banned_current.set(banned_ips as i64);
+        self.ips_tracked_current.set(tracked_ips as i64);
     }
 }
 

@@ -26,7 +26,7 @@ pub static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use clap::{Parser, ValueEnum};
 use tracing::{info, Level};
@@ -257,9 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_packet_size,
         default_keep_alive: keep_alive,
         max_keep_alive,
-        session_expiry_check_interval: Duration::from_secs(
-            file_config.session.expiry_check_interval,
-        ),
+        session_expiry_check_interval: file_config.session.expiry_check_interval,
         receive_maximum,
         max_qos,
         retain_available,
@@ -269,7 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_topic_alias,
         num_workers,
         sys_topics_enabled: file_config.mqtt.sys_topics,
-        sys_topics_interval: Duration::from_secs(file_config.mqtt.sys_interval),
+        sys_topics_interval: file_config.mqtt.sys_interval,
         // 0 = unbounded for all limits
         max_inflight: if file_config.limits.max_inflight == 0 {
             u16::MAX
@@ -286,7 +284,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             file_config.limits.max_awaiting_rel
         },
-        retry_interval: file_config.limits.retry_interval_duration(),
+        retry_interval: file_config.limits.retry_interval,
         outbound_channel_capacity: if file_config.limits.outbound_channel_capacity == 0 {
             // tokio mpsc channel max is ~2^61, use a large but safe value
             1_000_000
@@ -383,7 +381,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize persistence if enabled
     let persistence_manager = if file_config.persistence.enabled {
-        info!("  Persistence: enabled ({:?})", file_config.persistence.path);
+        info!(
+            "  Persistence: enabled ({:?})",
+            file_config.persistence.path
+        );
 
         // Open the fjall backend
         let backend = match FjallBackend::open(&file_config.persistence.path) {
@@ -397,7 +398,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Create the persistence manager
         let manager = Arc::new(PersistenceManager::new(
             backend,
-            file_config.persistence.flush_interval_ms,
+            file_config.persistence.flush_interval,
             file_config.persistence.max_batch_size,
         ));
 
@@ -439,6 +440,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("  Persistence: disabled");
         None
     };
+
+    // Setup flapping detection if enabled
+    if file_config.limits.flapping_detect.enabled
+        || file_config.limits.connection_limit.max_connections_per_ip > 0
+    {
+        info!(
+            "  DoS protection: flapping={}, max_per_ip={}, rate_limit={}/s",
+            file_config.limits.flapping_detect.enabled,
+            file_config.limits.connection_limit.max_connections_per_ip,
+            file_config.limits.connection_limit.rate_limit
+        );
+        let detector = vibemq::FlappingDetector::new(
+            file_config.limits.flapping_detect.clone(),
+            file_config.limits.connection_limit.clone(),
+        );
+        broker.set_flapping_detector(detector);
+    } else {
+        info!("  DoS protection: disabled");
+    }
 
     // Setup bridges if configured
     let enabled_bridges = file_config.bridge.iter().filter(|b| b.enabled).count();

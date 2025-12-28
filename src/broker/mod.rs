@@ -30,6 +30,7 @@ const TCP_BACKLOG: i32 = 4096;
 use crate::bridge::BridgeManager;
 use crate::cluster::ClusterManager;
 use crate::config::ProxyProtocolConfig;
+use crate::flapping::FlappingDetector;
 use crate::hooks::{DefaultHooks, Hooks};
 use crate::metrics::Metrics;
 use crate::persistence::{PersistenceManager, PersistenceOp, StoredRetainedMessage};
@@ -225,6 +226,8 @@ pub struct Broker {
     metrics: Option<Arc<Metrics>>,
     /// Persistence manager for durable storage
     persistence: Option<Arc<PersistenceManager>>,
+    /// Flapping detector for DoS protection
+    flapping_detector: Option<Arc<FlappingDetector>>,
 }
 
 impl Broker {
@@ -251,7 +254,18 @@ impl Broker {
             cluster_manager: None,
             metrics: None,
             persistence: None,
+            flapping_detector: None,
         }
+    }
+
+    /// Set flapping detector for DoS protection
+    pub fn set_flapping_detector(&mut self, detector: FlappingDetector) {
+        self.flapping_detector = Some(Arc::new(detector));
+    }
+
+    /// Get flapping detector (if enabled)
+    pub fn flapping_detector(&self) -> Option<&Arc<FlappingDetector>> {
+        self.flapping_detector.as_ref()
     }
 
     /// Set persistence manager for this broker
@@ -289,6 +303,7 @@ impl Broker {
             cluster_manager: None,
             metrics: None,
             persistence: self.persistence.clone(),
+            flapping_detector: None,
         }
     }
 
@@ -532,6 +547,7 @@ impl Broker {
             let hooks = self.hooks.clone();
             let metrics = self.metrics.clone();
             let persistence = self.persistence.clone();
+            let flapping_detector = self.flapping_detector.clone();
 
             tokio::spawn(async move {
                 loop {
@@ -547,6 +563,7 @@ impl Broker {
                             let hooks = hooks.clone();
                             let metrics = metrics.clone();
                             let persistence = persistence.clone();
+                            let flapping_detector = flapping_detector.clone();
                             let mut shutdown_rx = shutdown.subscribe();
 
                             tokio::spawn(async move {
@@ -555,7 +572,7 @@ impl Broker {
                                     if config.ws_proxy_protocol.enabled {
                                         match parse_proxy_header(
                                             &mut stream,
-                                            config.ws_proxy_protocol.timeout_duration(),
+                                            config.ws_proxy_protocol.timeout,
                                             config.ws_proxy_protocol.tls_termination,
                                         )
                                         .await
@@ -575,6 +592,19 @@ impl Broker {
                                     } else {
                                         (addr, None)
                                     };
+
+                                // Check flapping/rate limits before WebSocket handshake
+                                let client_ip = effective_addr.ip();
+                                if let Some(ref detector) = flapping_detector {
+                                    if let Err(reason) = detector.check_connection(client_ip) {
+                                        debug!(
+                                            "Rejecting WebSocket connection from {}: {:?}",
+                                            client_ip, reason
+                                        );
+                                        return;
+                                    }
+                                    detector.record_connection(client_ip);
+                                }
 
                                 // Perform WebSocket handshake with path validation
                                 match WsStream::accept_with_path(stream, &config.ws_path).await {
@@ -625,12 +655,21 @@ impl Broker {
 
                                         // Return buffers to the pool for reuse
                                         conn.return_buffers();
+
+                                        // Track disconnection for flapping detection
+                                        if let Some(ref detector) = flapping_detector {
+                                            detector.record_disconnection(effective_addr.ip());
+                                        }
                                     }
                                     Err(e) => {
                                         debug!(
                                             "WebSocket handshake failed for {}: {}",
                                             effective_addr, e
                                         );
+                                        // Track disconnection even on handshake failure
+                                        if let Some(ref detector) = flapping_detector {
+                                            detector.record_disconnection(effective_addr.ip());
+                                        }
                                     }
                                 }
                             });
@@ -671,6 +710,7 @@ impl Broker {
             let hooks = self.hooks.clone();
             let metrics = self.metrics.clone();
             let persistence = self.persistence.clone();
+            let flapping_detector = self.flapping_detector.clone();
 
             tokio::spawn(async move {
                 loop {
@@ -687,6 +727,7 @@ impl Broker {
                             let metrics = metrics.clone();
                             let tls_acceptor = tls_acceptor.clone();
                             let persistence = persistence.clone();
+                            let flapping_detector = flapping_detector.clone();
                             let mut shutdown_rx = shutdown.subscribe();
 
                             tokio::spawn(async move {
@@ -695,7 +736,7 @@ impl Broker {
                                     if config.tls_proxy_protocol.enabled {
                                         match parse_proxy_header(
                                             &mut stream,
-                                            config.tls_proxy_protocol.timeout_duration(),
+                                            config.tls_proxy_protocol.timeout,
                                             config.tls_proxy_protocol.tls_termination,
                                         )
                                         .await
@@ -715,6 +756,19 @@ impl Broker {
                                     } else {
                                         (addr, None)
                                     };
+
+                                // Check flapping/rate limits before TLS handshake
+                                let client_ip = effective_addr.ip();
+                                if let Some(ref detector) = flapping_detector {
+                                    if let Err(reason) = detector.check_connection(client_ip) {
+                                        debug!(
+                                            "Rejecting TLS connection from {}: {:?}",
+                                            client_ip, reason
+                                        );
+                                        return;
+                                    }
+                                    detector.record_connection(client_ip);
+                                }
 
                                 // Perform TLS handshake
                                 match tls_acceptor.accept(stream).await {
@@ -762,12 +816,21 @@ impl Broker {
 
                                         // Return buffers to the pool for reuse
                                         conn.return_buffers();
+
+                                        // Track disconnection for flapping detection
+                                        if let Some(ref detector) = flapping_detector {
+                                            detector.record_disconnection(effective_addr.ip());
+                                        }
                                     }
                                     Err(e) => {
                                         debug!(
                                             "TLS handshake failed for {}: {}",
                                             effective_addr, e
                                         );
+                                        // Track disconnection even on handshake failure
+                                        if let Some(ref detector) = flapping_detector {
+                                            detector.record_disconnection(effective_addr.ip());
+                                        }
                                     }
                                 }
                             });
@@ -803,6 +866,33 @@ impl Broker {
                 }
             }
         });
+
+        // Spawn flapping detector cleanup task if enabled
+        if let Some(ref detector) = self.flapping_detector {
+            let detector = detector.clone();
+            let interval = detector.cleanup_interval();
+            let mut shutdown_rx = self.shutdown.subscribe();
+
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(interval);
+                loop {
+                    tokio::select! {
+                        biased;
+
+                        _ = ticker.tick() => {
+                            detector.cleanup();
+                        }
+                        result = shutdown_rx.recv() => {
+                            match result {
+                                Ok(()) => break,
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         // Spawn bridge forwarding task if bridges are configured
         if let Some(ref bridge_manager) = self.bridge_manager {
@@ -1012,6 +1102,7 @@ impl Broker {
         let metrics = self.metrics.clone();
         let persistence = self.persistence.clone();
         let shutdown = self.shutdown.clone();
+        let flapping_detector = self.flapping_detector.clone();
 
         tokio::spawn(async move {
             debug!("Starting TCP accept loop");
@@ -1024,7 +1115,7 @@ impl Broker {
                         let (effective_addr, proxy_info) = if config.proxy_protocol.enabled {
                             match parse_proxy_header(
                                 &mut stream,
-                                config.proxy_protocol.timeout_duration(),
+                                config.proxy_protocol.timeout,
                                 config.proxy_protocol.tls_termination,
                             )
                             .await
@@ -1045,6 +1136,17 @@ impl Broker {
                             (addr, None)
                         };
 
+                        // Check flapping/rate limits before spawning handler
+                        let client_ip = effective_addr.ip();
+                        if let Some(ref detector) = flapping_detector {
+                            if let Err(reason) = detector.check_connection(client_ip) {
+                                debug!("Rejecting TCP connection from {}: {:?}", client_ip, reason);
+                                drop(stream);
+                                continue;
+                            }
+                            detector.record_connection(client_ip);
+                        }
+
                         spawn_connection_handler(
                             stream,
                             effective_addr,
@@ -1059,6 +1161,7 @@ impl Broker {
                             metrics.clone(),
                             persistence.clone(),
                             shutdown.clone(),
+                            flapping_detector.clone(),
                         );
                     }
                     Err(e) => {
@@ -1200,6 +1303,7 @@ fn spawn_connection_handler(
     metrics: Option<Arc<Metrics>>,
     persistence: Option<Arc<crate::persistence::PersistenceManager>>,
     shutdown: broadcast::Sender<()>,
+    flapping_detector: Option<Arc<FlappingDetector>>,
 ) {
     let mut shutdown_rx = shutdown.subscribe();
 
@@ -1256,6 +1360,11 @@ fn spawn_connection_handler(
 
         // Return buffers to the pool for reuse
         conn.return_buffers();
+
+        // Track disconnection for flapping detection
+        if let Some(ref detector) = flapping_detector {
+            detector.record_disconnection(addr.ip());
+        }
     });
 }
 

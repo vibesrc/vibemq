@@ -41,8 +41,7 @@ impl FjallBackend {
 
     /// Serialize a value using bincode
     fn serialize<T: bincode::Encode>(value: &T) -> Result<Vec<u8>> {
-        bincode::encode_to_vec(value, bincode::config::standard())
-            .map_err(PersistenceError::from)
+        bincode::encode_to_vec(value, bincode::config::standard()).map_err(PersistenceError::from)
     }
 
     /// Deserialize a value using bincode

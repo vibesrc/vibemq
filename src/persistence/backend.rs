@@ -6,9 +6,7 @@
 use async_trait::async_trait;
 
 use super::error::Result;
-use super::models::{
-    LoadedData, StoredRetainedMessage, StoredRole, StoredSession, StoredUser,
-};
+use super::models::{LoadedData, StoredRetainedMessage, StoredRole, StoredSession, StoredUser};
 
 /// Persistence operation for batch writes
 #[derive(Debug, Clone)]

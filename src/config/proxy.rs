@@ -16,9 +16,14 @@ pub struct ProxyProtocolConfig {
     /// When true, parse PP2_TYPE_SSL TLVs for SNI and client cert CN.
     pub tls_termination: bool,
 
-    /// Timeout for reading PROXY header in seconds.
-    /// Default: 5 seconds
-    pub timeout: u64,
+    /// Timeout for reading PROXY header (e.g., "5s", "10s")
+    /// Default: 5s
+    #[serde(default = "default_timeout", with = "humantime_serde")]
+    pub timeout: Duration,
+}
+
+fn default_timeout() -> Duration {
+    Duration::from_secs(5)
 }
 
 impl Default for ProxyProtocolConfig {
@@ -26,14 +31,7 @@ impl Default for ProxyProtocolConfig {
         Self {
             enabled: false,
             tls_termination: false,
-            timeout: 5,
+            timeout: Duration::from_secs(5),
         }
-    }
-}
-
-impl ProxyProtocolConfig {
-    /// Get timeout as Duration
-    pub fn timeout_duration(&self) -> Duration {
-        Duration::from_secs(self.timeout)
     }
 }

@@ -227,7 +227,8 @@ where
                             properties: publish.properties.clone(),
                             timestamp: Instant::now(),
                         };
-                        self.retained.insert(publish.topic.clone(), retained_msg.clone());
+                        self.retained
+                            .insert(publish.topic.clone(), retained_msg.clone());
                         if let Some(ref persistence) = self.persistence {
                             persistence.write(PersistenceOp::SetRetained {
                                 topic: publish.topic.clone(),
@@ -257,7 +258,8 @@ where
                     properties: publish.properties.clone(),
                     timestamp: Instant::now(),
                 };
-                self.retained.insert(publish.topic.clone(), retained_msg.clone());
+                self.retained
+                    .insert(publish.topic.clone(), retained_msg.clone());
                 if let Some(ref persistence) = self.persistence {
                     persistence.write(PersistenceOp::SetRetained {
                         topic: publish.topic.clone(),

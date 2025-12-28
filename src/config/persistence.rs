@@ -1,6 +1,7 @@
 //! Persistence configuration.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -12,6 +13,10 @@ pub enum BackendType {
     #[default]
     Fjall,
     // Future: Redis, Postgres, etc.
+}
+
+fn default_flush_interval() -> Duration {
+    Duration::from_millis(100)
 }
 
 /// Persistence configuration
@@ -27,8 +32,9 @@ pub struct PersistenceConfig {
     /// Data directory path (for fjall)
     pub path: PathBuf,
 
-    /// Flush interval in milliseconds
-    pub flush_interval_ms: u64,
+    /// Flush interval (e.g., "100ms", "1s")
+    #[serde(default = "default_flush_interval", with = "humantime_serde")]
+    pub flush_interval: Duration,
 
     /// Maximum batch size before forced flush
     pub max_batch_size: usize,
@@ -40,7 +46,7 @@ impl Default for PersistenceConfig {
             enabled: true,
             backend: BackendType::Fjall,
             path: PathBuf::from("./data"),
-            flush_interval_ms: 100,
+            flush_interval: Duration::from_millis(100),
             max_batch_size: 100,
         }
     }

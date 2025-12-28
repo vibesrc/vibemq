@@ -70,8 +70,8 @@ fn test_bridge_config(name: &str, remote_port: u16, rules: Vec<ForwardRule>) -> 
         forwards: rules,
         client_id: format!("bridge-{}", name),
         keepalive: 30,
-        reconnect_interval: 1,
-        max_reconnect_interval: 5,
+        reconnect_interval: std::time::Duration::from_secs(1),
+        max_reconnect_interval: std::time::Duration::from_secs(5),
         loop_prevention: LoopPrevention::NoLocal,
         ..Default::default()
     }

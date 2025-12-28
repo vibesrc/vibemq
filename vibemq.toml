@@ -34,20 +34,20 @@ workers = 0
 # [server.proxy_protocol]
 # enabled = true                # Enable PROXY protocol parsing on TCP listener
 # tls_termination = false       # Trust TLS info from PROXY v2 TLVs (SNI, client cert CN)
-# timeout = 5                   # Seconds to wait for PROXY header
+# timeout = "5s"                # Time to wait for PROXY header (e.g., "5s", "10s")
 #
 # # WebSocket listener proxy protocol (separate config)
 # [server.ws_proxy_protocol]
 # enabled = true
 # tls_termination = true        # Enable if proxy handles TLS/SNI
-# timeout = 5
+# timeout = "5s"
 #
 # # TLS listener proxy protocol
 # # Note: PROXY header is parsed BEFORE TLS handshake
 # [server.tls_proxy_protocol]
 # enabled = true
 # tls_termination = false       # TLS handled by broker, not proxy
-# timeout = 5
+# timeout = "5s"
 
 [limits]
 # Note: Set any limit to 0 for unbounded
@@ -62,14 +62,46 @@ max_inflight = 32
 max_queued_messages = 1000
 # Maximum pending PUBREL for QoS 2 (default: 100)
 max_awaiting_rel = 100
-# Seconds before retrying unacked messages (default: 30)
-retry_interval = 30
+# Retry interval for unacked messages (e.g., "30s", "1m")
+retry_interval = "30s"
 # Per-connection outbound message channel capacity (default: 1024)
 # Higher values handle burst traffic better but use more memory per connection
 outbound_channel_capacity = 1024
 # Maximum topic levels (depth) allowed (default: 0 = unlimited)
 # Topic levels are separated by '/'. For example, "a/b/c" has 3 levels.
 max_topic_levels = 32
+
+# Flapping Detection (DoS Protection)
+# Detects and temporarily bans clients that rapidly connect/disconnect.
+# Uses real client IP from PROXY protocol when available.
+[limits.flapping_detect]
+enabled = false
+# Maximum disconnections within window before ban
+max_count = 15
+# Detection window (e.g., "1m", "60s")
+window_time = "1m"
+# Ban duration (e.g., "5m", "300s")
+ban_time = "5m"
+
+# Connection Rate Limiting (DoS Protection)
+# Note: Set limits to 0 for unlimited/disabled
+[limits.connection_limit]
+# Maximum concurrent connections per IP (0 = unlimited)
+max_connections_per_ip = 0
+# Maximum new connections per second per IP (0 = no limit)
+rate_limit = 0
+# Burst allowance for rate limiting
+rate_burst = 20
+# Cleanup interval for expired bans and stale entries (e.g., "1m", "60s")
+cleanup_interval = "1m"
+# Static IP ban list
+# banned_ips = ["10.0.0.50", "192.168.1.100"]
+# Static IP allow list (bypasses all limits)
+# allowed_ips = ["127.0.0.1"]
+# Banned CIDR ranges
+# banned_cidrs = ["10.0.1.0/24"]
+# Allowed CIDR ranges (bypasses all limits)
+# allowed_cidrs = ["192.168.0.0/16"]
 
 [metrics]
 enabled = true
@@ -79,8 +111,8 @@ enabled = true
 default_keep_alive = 60
 # Maximum keep alive in seconds
 max_keep_alive = 65535
-# Seconds between session expiry checks
-expiry_check_interval = 60
+# Session expiry check interval (e.g., "1m", "60s")
+expiry_check_interval = "1m"
 # Maximum topic aliases (MQTT v5.0)
 max_topic_aliases = 65535
 
@@ -97,8 +129,8 @@ subscription_identifiers = true
 shared_subscriptions = true
 # Whether to publish $SYS/# broker statistics topics
 sys_topics = true
-# $SYS topic publish interval in seconds
-sys_interval = 10
+# $SYS topic publish interval (e.g., "10s", "1m")
+sys_interval = "10s"
 
 # Persistence configuration
 # Enables persistence of retained messages and sessions across broker restarts
@@ -107,7 +139,7 @@ sys_interval = 10
 # enabled = true                    # Enable persistence (default: true)
 # backend = "fjall"                 # Storage backend: "fjall" (embedded LSM-tree)
 # path = "/var/lib/vibemq"          # Data directory (default: "./data")
-# flush_interval_ms = 100           # Batch flush interval in milliseconds
+# flush_interval = "100ms"          # Batch flush interval (e.g., "100ms", "1s")
 # max_batch_size = 100              # Max operations before forced flush
 
 # Data persisted:
@@ -179,8 +211,9 @@ subscribe = ["#", "$SYS/#"]
 # password = "secret"
 # keepalive = 60                          # Keep alive interval (seconds)
 # clean_start = true                      # Start with clean session
-# reconnect_interval = 5                  # Initial reconnect delay (seconds)
-# max_reconnect_interval = 60             # Maximum reconnect delay (seconds)
+# reconnect_interval = "5s"               # Initial reconnect delay (e.g., "5s", "10s")
+# max_reconnect_interval = "1m"           # Maximum reconnect delay (e.g., "1m", "5m")
+# connect_timeout = "30s"                 # Connection timeout (e.g., "30s", "1m")
 # enabled = true                          # Enable/disable this bridge
 #
 # # Loop prevention strategy:

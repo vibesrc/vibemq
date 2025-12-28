@@ -8,7 +8,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use bincode::{Decode, Encode};
 
 use crate::protocol::{Properties, Publish, QoS, RetainHandling, SubscriptionOptions};
-use crate::session::{InflightMessage, PendingMessage, Qos2State, Session, SessionSubscription, WillMessage};
+use crate::session::{
+    InflightMessage, PendingMessage, Qos2State, Session, SessionSubscription, WillMessage,
+};
 
 /// Stored retained message
 #[derive(Debug, Clone, Encode, Decode)]
@@ -179,14 +181,15 @@ impl From<&Properties> for StoredProperties {
 
 impl From<StoredProperties> for Properties {
     fn from(stored: StoredProperties) -> Self {
-        let mut props = Properties::default();
-        props.payload_format_indicator = stored.payload_format_indicator;
-        props.message_expiry_interval = stored.message_expiry_interval;
-        props.content_type = stored.content_type;
-        props.response_topic = stored.response_topic;
-        props.correlation_data = stored.correlation_data.map(bytes::Bytes::from);
-        props.user_properties = stored.user_properties;
-        props
+        Properties {
+            payload_format_indicator: stored.payload_format_indicator,
+            message_expiry_interval: stored.message_expiry_interval,
+            content_type: stored.content_type,
+            response_topic: stored.response_topic,
+            correlation_data: stored.correlation_data.map(bytes::Bytes::from),
+            user_properties: stored.user_properties,
+            ..Default::default()
+        }
     }
 }
 

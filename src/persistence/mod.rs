@@ -42,7 +42,7 @@ impl PersistenceManager {
     /// This spawns a background task that batches and commits writes.
     pub fn new(
         backend: Arc<dyn StorageBackend>,
-        flush_interval_ms: u64,
+        flush_interval: Duration,
         max_batch_size: usize,
     ) -> Self {
         let (tx, rx) = mpsc::channel(10_000);
@@ -54,7 +54,7 @@ impl PersistenceManager {
             backend_clone,
             rx,
             shutdown_rx,
-            flush_interval_ms,
+            flush_interval,
             max_batch_size,
         ));
 
@@ -104,11 +104,11 @@ impl PersistenceManager {
         backend: Arc<dyn StorageBackend>,
         mut rx: mpsc::Receiver<PersistenceOp>,
         mut shutdown_rx: mpsc::Receiver<()>,
-        flush_interval_ms: u64,
+        flush_interval: Duration,
         max_batch_size: usize,
     ) {
         let mut batch = Vec::with_capacity(max_batch_size);
-        let mut interval = tokio::time::interval(Duration::from_millis(flush_interval_ms));
+        let mut interval = tokio::time::interval(flush_interval);
 
         loop {
             tokio::select! {
