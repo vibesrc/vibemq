@@ -7,10 +7,12 @@ mod connection;
 mod router;
 mod sys_topics;
 mod tls;
+mod writer;
 
 pub use connection::Connection;
 pub use router::MessageRouter;
 pub use tls::load_tls_config;
+pub use writer::{SendError, SharedWriter};
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -21,7 +23,7 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tracing::{debug, error, info};
 
 /// TCP listen backlog size - high value for burst connection handling
@@ -29,6 +31,7 @@ const TCP_BACKLOG: i32 = 4096;
 
 use crate::bridge::BridgeManager;
 use crate::cluster::ClusterManager;
+use crate::codec::CachedPublish;
 use crate::config::ProxyProtocolConfig;
 use crate::flapping::FlappingDetector;
 use crate::hooks::{DefaultHooks, Hooks};
@@ -39,6 +42,28 @@ use crate::proxy::{parse_proxy_header, ProxyInfo};
 use crate::session::SessionStore;
 use crate::topic::SubscriptionStore;
 use crate::transport::WsStream;
+
+/// Message sent to a connection for outbound delivery.
+///
+/// This enum enables pre-serialization optimization for PUBLISH fan-out:
+/// - `CachedPublish`: Pre-serialized bytes that can be written with memcpy + patching
+/// - `Packet`: Standard packet that requires full encoding (fallback for complex cases)
+#[derive(Debug)]
+pub enum OutboundMessage {
+    /// Pre-serialized PUBLISH for efficient fan-out.
+    /// Used when subscription_ids are empty (most common case).
+    CachedPublish {
+        /// Shared pre-serialized bytes (one allocation for all subscribers)
+        cached: Arc<CachedPublish>,
+        /// QoS for this subscriber (patches first byte)
+        qos: QoS,
+        /// Retain flag for this subscriber
+        retain: bool,
+    },
+    /// Standard packet requiring full encoding.
+    /// Used for non-PUBLISH packets or when subscription_ids are present.
+    Packet(Packet),
+}
 
 /// Broker configuration
 #[derive(Debug, Clone)]
@@ -168,7 +193,7 @@ mod num_cpus {
 /// Retained message
 #[derive(Debug, Clone)]
 pub struct RetainedMessage {
-    pub topic: String,
+    pub topic: Arc<str>,
     pub payload: Bytes,
     pub qos: QoS,
     pub properties: Properties,
@@ -210,8 +235,8 @@ pub struct Broker {
     subscriptions: Arc<SubscriptionStore>,
     /// Retained messages
     retained: Arc<DashMap<String, RetainedMessage>>,
-    /// Active connections (client_id -> connection handle)
-    connections: Arc<DashMap<Arc<str>, mpsc::Sender<Packet>>>,
+    /// Active connections (client_id -> shared writer for direct writes)
+    connections: Arc<DashMap<Arc<str>, Arc<SharedWriter>>>,
     /// Shutdown signal
     shutdown: broadcast::Sender<()>,
     /// Event channel
@@ -336,6 +361,9 @@ impl Broker {
                     topic
                 );
 
+                // Convert topic to Arc<str> for efficient cloning
+                let topic: Arc<str> = Arc::from(topic);
+
                 // Create a publish packet
                 let publish = Publish {
                     dup: false,
@@ -349,12 +377,11 @@ impl Broker {
 
                 // Handle retained message
                 if retain {
+                    let topic_str = topic.to_string();
                     if payload.is_empty() {
-                        retained.remove(&topic);
+                        retained.remove(&topic_str);
                         if let Some(ref persistence) = persistence {
-                            persistence.write(PersistenceOp::DeleteRetained {
-                                topic: topic.clone(),
-                            });
+                            persistence.write(PersistenceOp::DeleteRetained { topic: topic_str });
                         }
                     } else {
                         let retained_msg = RetainedMessage {
@@ -364,10 +391,10 @@ impl Broker {
                             properties: Properties::default(),
                             timestamp: Instant::now(),
                         };
-                        retained.insert(topic.clone(), retained_msg.clone());
+                        retained.insert(topic_str.clone(), retained_msg.clone());
                         if let Some(ref persistence) = persistence {
                             persistence.write(PersistenceOp::SetRetained {
-                                topic: topic.clone(),
+                                topic: topic_str,
                                 message: StoredRetainedMessage::from(&retained_msg),
                             });
                         }
@@ -399,10 +426,9 @@ impl Broker {
                 for (client_id, sub_qos) in client_qos {
                     let effective_qos = qos.min(sub_qos);
 
-                    if let Some(sender) = connections.get(&client_id) {
+                    if let Some(writer) = connections.get(&client_id) {
                         let mut publish = publish.clone();
-                        publish.qos = effective_qos;
-                        match sender.try_send(Packet::Publish(publish)) {
+                        match writer.send_publish(&mut publish, effective_qos, false) {
                             Ok(()) => {
                                 debug!("Cluster inbound_callback: sent to client {}", client_id)
                             }
@@ -442,6 +468,9 @@ impl Broker {
 
         let inbound_callback = Arc::new(
             move |topic: String, payload: Bytes, qos: QoS, retain: bool| {
+                // Convert topic to Arc<str> for efficient cloning
+                let topic: Arc<str> = Arc::from(topic);
+
                 // Create a publish packet
                 let publish = Publish {
                     dup: false,
@@ -455,12 +484,11 @@ impl Broker {
 
                 // Handle retained message
                 if retain {
+                    let topic_str = topic.to_string();
                     if payload.is_empty() {
-                        retained.remove(&topic);
+                        retained.remove(&topic_str);
                         if let Some(ref persistence) = persistence {
-                            persistence.write(PersistenceOp::DeleteRetained {
-                                topic: topic.clone(),
-                            });
+                            persistence.write(PersistenceOp::DeleteRetained { topic: topic_str });
                         }
                     } else {
                         let retained_msg = RetainedMessage {
@@ -470,10 +498,10 @@ impl Broker {
                             properties: Properties::default(),
                             timestamp: Instant::now(),
                         };
-                        retained.insert(topic.clone(), retained_msg.clone());
+                        retained.insert(topic_str.clone(), retained_msg.clone());
                         if let Some(ref persistence) = persistence {
                             persistence.write(PersistenceOp::SetRetained {
-                                topic: topic.clone(),
+                                topic: topic_str,
                                 message: StoredRetainedMessage::from(&retained_msg),
                             });
                         }
@@ -499,10 +527,9 @@ impl Broker {
                 for (client_id, sub_qos) in client_qos {
                     let effective_qos = qos.min(sub_qos);
 
-                    if let Some(sender) = connections.get(&client_id) {
+                    if let Some(writer) = connections.get(&client_id) {
                         let mut publish = publish.clone();
-                        publish.qos = effective_qos;
-                        let _ = sender.try_send(Packet::Publish(publish));
+                        let _ = writer.send_publish(&mut publish, effective_qos, false);
                     } else {
                         // Client disconnected, queue message if persistent session
                         if let Some(session) = sessions.get(client_id.as_ref()) {
@@ -1204,12 +1231,15 @@ impl Broker {
 
     /// Publish a message from the server
     pub fn publish(&self, topic: String, payload: Bytes, qos: QoS, retain: bool) {
+        // Convert topic to Arc<str> for efficient cloning in fan-out
+        let topic_arc: Arc<str> = Arc::from(topic.as_str());
+
         // Create a publish packet
         let publish = Publish {
             dup: false,
             qos,
             retain,
-            topic: topic.clone(),
+            topic: topic_arc.clone(),
             packet_id: None,
             payload: payload.clone(),
             properties: Properties::default(),
@@ -1220,13 +1250,11 @@ impl Broker {
             if payload.is_empty() {
                 self.retained.remove(&topic);
                 if let Some(ref persistence) = self.persistence {
-                    persistence.write(PersistenceOp::DeleteRetained {
-                        topic: topic.clone(),
-                    });
+                    persistence.write(PersistenceOp::DeleteRetained { topic });
                 }
             } else {
                 let retained_msg = RetainedMessage {
-                    topic: topic.clone(),
+                    topic: topic_arc.clone(),
                     payload,
                     qos,
                     properties: Properties::default(),
@@ -1235,7 +1263,7 @@ impl Broker {
                 self.retained.insert(topic.clone(), retained_msg.clone());
                 if let Some(ref persistence) = self.persistence {
                     persistence.write(PersistenceOp::SetRetained {
-                        topic: topic.clone(),
+                        topic,
                         message: StoredRetainedMessage::from(&retained_msg),
                     });
                 }
@@ -1243,7 +1271,7 @@ impl Broker {
         }
 
         // Route to subscribers
-        let matches = self.subscriptions.matches(&topic);
+        let matches = self.subscriptions.matches(&topic_arc);
 
         // Deduplicate by client_id (keep highest QoS) - use AHashMap for faster lookup
         let mut client_qos: AHashMap<Arc<str>, QoS> = AHashMap::with_capacity(matches.len());
@@ -1260,12 +1288,10 @@ impl Broker {
         for (client_id, sub_qos) in client_qos {
             let effective_qos = qos.min(sub_qos);
 
-            if let Some(sender) = self.connections.get(&client_id) {
+            if let Some(writer) = self.connections.get(&client_id) {
                 let mut publish = publish.clone();
-                publish.qos = effective_qos;
-
-                // For QoS > 0, packet_id will be assigned by the connection handler
-                let _ = sender.try_send(Packet::Publish(publish));
+                // SharedWriter handles packet_id assignment and inflight tracking
+                let _ = writer.send_publish(&mut publish, effective_qos, false);
             } else {
                 // Client disconnected, queue message if persistent session
                 if let Some(session) = self.sessions.get(client_id.as_ref()) {
@@ -1296,7 +1322,7 @@ fn spawn_connection_handler(
     sessions: Arc<SessionStore>,
     subscriptions: Arc<SubscriptionStore>,
     retained: Arc<DashMap<String, RetainedMessage>>,
-    connections: Arc<DashMap<Arc<str>, mpsc::Sender<Packet>>>,
+    connections: Arc<DashMap<Arc<str>, Arc<SharedWriter>>>,
     config: BrokerConfig,
     events: broadcast::Sender<BrokerEvent>,
     hooks: Arc<dyn Hooks>,

@@ -4,6 +4,7 @@
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
@@ -169,7 +170,7 @@ impl TestClient {
             dup: false,
             qos,
             retain,
-            topic: topic.to_string(),
+            topic: Arc::from(topic),
             packet_id,
             payload: Bytes::copy_from_slice(payload),
             properties: Properties::default(),

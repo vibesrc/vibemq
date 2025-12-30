@@ -9,6 +9,7 @@ use tracing::{debug, error, trace};
 
 use super::{BytesMutExt, Connection, ConnectionError, State};
 use crate::broker::BrokerEvent;
+use crate::codec::CachedPublish;
 use crate::protocol::{
     ConnAck, Disconnect, Packet, Properties, ProtocolVersion, PubRel, QoS, ReasonCode,
 };
@@ -208,12 +209,12 @@ where
 
         // Check for existing connection and disconnect it
         if let Some(existing) = self.connections.get(&client_id) {
-            // Send disconnect to existing connection
+            // Send disconnect to existing connection via SharedWriter
             let disconnect = Packet::Disconnect(Disconnect {
                 reason_code: ReasonCode::SessionTakenOver,
                 properties: Properties::default(),
             });
-            let _ = existing.try_send(disconnect);
+            let _ = existing.send_packet(&disconnect);
         }
 
         // Get or create session
@@ -289,9 +290,20 @@ where
             s.touch();
         }
 
-        // Register connection
-        self.connections
-            .insert(client_id.clone(), self.packet_tx.clone());
+        // Create SharedWriter for direct writes (bypasses channel overhead)
+        let max_packet_size = {
+            let s = session.read();
+            s.max_packet_size
+        };
+        let shared_writer = Arc::new(crate::broker::SharedWriter::new(
+            session.clone(),
+            protocol_version,
+            max_packet_size,
+        ));
+
+        // Register connection with SharedWriter
+        self.connections.insert(client_id.clone(), shared_writer.clone());
+        self.shared_writer = Some(shared_writer);
 
         // Send CONNACK
         let mut connack = ConnAck {
@@ -412,7 +424,7 @@ where
                 if let Some(packet_id) = publish.packet_id {
                     s.inflight_outgoing.insert(
                         packet_id,
-                        InflightMessage {
+                        InflightMessage::Full {
                             packet_id,
                             publish: publish.clone(),
                             qos2_state: if publish.qos == QoS::ExactlyOnce {
@@ -462,26 +474,109 @@ where
         &mut self,
         session: &Arc<RwLock<Session>>,
     ) -> Result<(), ConnectionError> {
+        // Info needed for resend, extracted to avoid holding lock during I/O
+        enum ResendInfo {
+            /// Zero-copy raw: use write_to with dup=true
+            Raw {
+                packet_id: u16,
+                raw: Arc<crate::codec::RawPublish>,
+                qos: QoS,
+                retain: bool,
+            },
+            /// Pre-serialized: use write_to with dup=true
+            Cached {
+                packet_id: u16,
+                cached: Arc<CachedPublish>,
+                qos: QoS,
+                retain: bool,
+            },
+            /// Full publish: encode with dup=true
+            Full {
+                packet_id: u16,
+                publish: crate::protocol::Publish,
+            },
+            /// QoS 2 waiting for PUBCOMP: resend PUBREL
+            PubRel { packet_id: u16 },
+        }
+
         let (to_resend, max_packet_size) = {
             let mut s = session.write();
-            let now = Instant::now();
             let messages: Vec<_> = s
                 .inflight_outgoing
                 .iter_mut()
                 .map(|(packet_id, inflight)| {
                     // Update sent_at for retry tracking
-                    inflight.sent_at = now;
-                    inflight.retry_count += 1;
-                    (*packet_id, inflight.publish.clone(), inflight.qos2_state)
+                    inflight.touch();
+                    *inflight.retry_count_mut() += 1;
+
+                    // Check QoS 2 state - if waiting for PUBCOMP, resend PUBREL
+                    match inflight.qos2_state() {
+                        Some(Qos2State::WaitingPubComp) => {
+                            ResendInfo::PubRel { packet_id: *packet_id }
+                        }
+                        _ => {
+                            // QoS 1 or QoS 2 waiting for PUBREC: resend PUBLISH
+                            match inflight {
+                                InflightMessage::Raw { raw, qos, retain, .. } => {
+                                    ResendInfo::Raw {
+                                        packet_id: *packet_id,
+                                        raw: raw.clone(),
+                                        qos: *qos,
+                                        retain: *retain,
+                                    }
+                                }
+                                InflightMessage::Cached { cached, qos, retain, .. } => {
+                                    ResendInfo::Cached {
+                                        packet_id: *packet_id,
+                                        cached: cached.clone(),
+                                        qos: *qos,
+                                        retain: *retain,
+                                    }
+                                }
+                                InflightMessage::Full { publish, .. } => {
+                                    ResendInfo::Full {
+                                        packet_id: *packet_id,
+                                        publish: publish.clone(),
+                                    }
+                                }
+                            }
+                        }
+                    }
                 })
                 .collect();
             (messages, s.max_packet_size)
         };
 
-        for (packet_id, mut publish, qos2_state) in to_resend {
-            match qos2_state {
-                None | Some(Qos2State::WaitingPubRec) => {
-                    // QoS 1, or QoS 2 waiting for PUBREC: resend PUBLISH with DUP=1 [MQTT-3.3.1-1]
+        for info in to_resend {
+            match info {
+                ResendInfo::Raw { packet_id, raw, qos, retain } => {
+                    // Zero-copy path: use raw bytes with dup=true
+                    self.write_buf.clear();
+                    raw.write_to(&mut self.write_buf, Some(packet_id), qos, retain, true);
+
+                    if self.write_buf.len() <= max_packet_size as usize {
+                        trace!(
+                            "Resending inflight PUBLISH (raw) packet_id={} with DUP=1",
+                            packet_id
+                        );
+                        self.stream.write_all(&self.write_buf).await?;
+                    }
+                }
+                ResendInfo::Cached { packet_id, cached, qos, retain } => {
+                    // Fast path: use pre-serialized bytes with dup=true
+                    self.write_buf.clear();
+                    cached.write_to(&mut self.write_buf, Some(packet_id), qos, retain, true);
+
+                    if self.write_buf.len() <= max_packet_size as usize {
+                        trace!(
+                            "Resending inflight PUBLISH (cached) packet_id={} with DUP=1",
+                            packet_id
+                        );
+                        self.stream.write_all(&self.write_buf).await?;
+                    }
+                }
+                ResendInfo::Full { packet_id, mut publish } => {
+                    // Fallback path: encode full publish
                     publish.dup = true;
                     publish.packet_id = Some(packet_id);
 
@@ -492,13 +587,13 @@ where
 
                     if self.write_buf.len() <= max_packet_size as usize {
                         trace!(
-                            "Resending inflight PUBLISH packet_id={} with DUP=1",
+                            "Resending inflight PUBLISH (full) packet_id={} with DUP=1",
                             packet_id
                         );
                         self.stream.write_all(&self.write_buf).await?;
                     }
                 }
-                Some(Qos2State::WaitingPubComp) => {
+                ResendInfo::PubRel { packet_id } => {
                     // QoS 2 waiting for PUBCOMP: resend PUBREL
                     let pubrel = PubRel::new(packet_id);
                     self.write_buf.clear();

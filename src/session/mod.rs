@@ -20,6 +20,7 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 
+use crate::codec::{CachedPublish, RawPublish};
 use crate::protocol::{Properties, ProtocolVersion, Publish, QoS, SubscriptionOptions};
 
 /// A pending message with timestamp for expiry tracking
@@ -43,18 +44,125 @@ pub enum SessionState {
 }
 
 /// Inflight message state for QoS 1/2
+///
+/// Supports three modes:
+/// - Raw: Zero-copy from incoming wire bytes (fastest)
+/// - Cached: Pre-serialized bytes for efficient retransmission
+/// - Full: Original Publish for complex cases (subscription IDs in properties)
 #[derive(Debug, Clone)]
-pub struct InflightMessage {
-    /// Packet identifier
-    pub packet_id: u16,
-    /// The publish packet
-    pub publish: Publish,
-    /// QoS 2 state
-    pub qos2_state: Option<Qos2State>,
-    /// Timestamp when the message was sent
-    pub sent_at: Instant,
-    /// Number of retransmission attempts
-    pub retry_count: u32,
+pub enum InflightMessage {
+    /// Zero-copy from incoming wire bytes
+    Raw {
+        packet_id: u16,
+        raw: Arc<RawPublish>,
+        qos: QoS,
+        retain: bool,
+        qos2_state: Option<Qos2State>,
+        sent_at: Instant,
+        retry_count: u32,
+    },
+    /// Pre-serialized for efficient retransmission
+    Cached {
+        packet_id: u16,
+        cached: Arc<CachedPublish>,
+        qos: QoS,
+        retain: bool,
+        qos2_state: Option<Qos2State>,
+        sent_at: Instant,
+        retry_count: u32,
+    },
+    /// Full publish for complex cases
+    Full {
+        packet_id: u16,
+        publish: Publish,
+        qos2_state: Option<Qos2State>,
+        sent_at: Instant,
+        retry_count: u32,
+    },
+}
+
+impl InflightMessage {
+    /// Get the packet ID
+    pub fn packet_id(&self) -> u16 {
+        match self {
+            InflightMessage::Raw { packet_id, .. } => *packet_id,
+            InflightMessage::Cached { packet_id, .. } => *packet_id,
+            InflightMessage::Full { packet_id, .. } => *packet_id,
+        }
+    }
+
+    /// Get the QoS level
+    pub fn qos(&self) -> QoS {
+        match self {
+            InflightMessage::Raw { qos, .. } => *qos,
+            InflightMessage::Cached { qos, .. } => *qos,
+            InflightMessage::Full { publish, .. } => publish.qos,
+        }
+    }
+
+    /// Get mutable reference to QoS 2 state
+    pub fn qos2_state_mut(&mut self) -> &mut Option<Qos2State> {
+        match self {
+            InflightMessage::Raw { qos2_state, .. } => qos2_state,
+            InflightMessage::Cached { qos2_state, .. } => qos2_state,
+            InflightMessage::Full { qos2_state, .. } => qos2_state,
+        }
+    }
+
+    /// Get the sent timestamp
+    pub fn sent_at(&self) -> Instant {
+        match self {
+            InflightMessage::Raw { sent_at, .. } => *sent_at,
+            InflightMessage::Cached { sent_at, .. } => *sent_at,
+            InflightMessage::Full { sent_at, .. } => *sent_at,
+        }
+    }
+
+    /// Get mutable reference to retry count
+    pub fn retry_count_mut(&mut self) -> &mut u32 {
+        match self {
+            InflightMessage::Raw { retry_count, .. } => retry_count,
+            InflightMessage::Cached { retry_count, .. } => retry_count,
+            InflightMessage::Full { retry_count, .. } => retry_count,
+        }
+    }
+
+    /// Update sent_at timestamp
+    pub fn touch(&mut self) {
+        match self {
+            InflightMessage::Raw { sent_at, .. } => *sent_at = Instant::now(),
+            InflightMessage::Cached { sent_at, .. } => *sent_at = Instant::now(),
+            InflightMessage::Full { sent_at, .. } => *sent_at = Instant::now(),
+        }
+    }
+
+    /// Get the Publish data if available (Full variant only)
+    /// Used for persistence - Raw and Cached variants aren't persisted as Publish
+    pub fn publish(&self) -> Option<&Publish> {
+        match self {
+            InflightMessage::Raw { .. } => None,
+            InflightMessage::Cached { .. } => None,
+            InflightMessage::Full { publish, .. } => Some(publish),
+        }
+    }
+
+    /// Get QoS 2 state (immutable reference)
+    pub fn qos2_state(&self) -> Option<Qos2State> {
+        match self {
+            InflightMessage::Raw { qos2_state, .. } => *qos2_state,
+            InflightMessage::Cached { qos2_state, .. } => *qos2_state,
+            InflightMessage::Full { qos2_state, .. } => *qos2_state,
+        }
+    }
+
+    /// Get the retry count
+    pub fn retry_count(&self) -> u32 {
+        match self {
+            InflightMessage::Raw { retry_count, .. } => *retry_count,
+            InflightMessage::Cached { retry_count, .. } => *retry_count,
+            InflightMessage::Full { retry_count, .. } => *retry_count,
+        }
+    }
 }
 
 /// QoS 2 message state
@@ -564,7 +672,7 @@ mod tests {
 
         // Create a message with 1 second expiry
         let mut publish1 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("test1"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -576,7 +684,7 @@ mod tests {
 
         // Create a message with no expiry
         let publish2 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("test2"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -587,7 +695,7 @@ mod tests {
 
         // Create a message with long expiry
         let mut publish3 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("test3"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -629,7 +737,7 @@ mod tests {
             Session::new("test".into(), ProtocolVersion::V5, SessionLimits::default());
 
         let mut publish = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("test"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -668,7 +776,7 @@ mod tests {
             Session::new("test".into(), ProtocolVersion::V5, SessionLimits::default());
 
         let mut publish1 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("expires"),
             qos: QoS::AtLeastOnce,
             retain: false,
@@ -679,7 +787,7 @@ mod tests {
         publish1.properties.message_expiry_interval = Some(1);
 
         let publish2 = Publish {
-            topic: "test/topic".to_string(),
+            topic: Arc::from("test/topic"),
             payload: bytes::Bytes::from("no_expiry"),
             qos: QoS::AtLeastOnce,
             retain: false,

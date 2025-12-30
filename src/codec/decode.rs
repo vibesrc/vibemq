@@ -2,6 +2,8 @@
 //!
 //! Decodes MQTT packets for both v3.1.1 and v5.0
 
+use std::sync::Arc;
+
 use bytes::Bytes;
 
 use super::{read_binary, read_string, read_variable_int, MAX_REMAINING_LENGTH};
@@ -343,7 +345,7 @@ impl Decoder {
             dup,
             qos,
             retain,
-            topic: topic.to_string(),
+            topic: Arc::from(topic),
             packet_id,
             payload: message_payload,
             properties,

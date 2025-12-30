@@ -8,7 +8,7 @@ use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
 
 /// Default buffer size for pooled buffers
-const DEFAULT_BUFFER_SIZE: usize = 4096;
+const DEFAULT_BUFFER_SIZE: usize = 2048;
 
 /// Maximum number of buffers to keep in the pool
 const MAX_POOLED_BUFFERS: usize = 256;

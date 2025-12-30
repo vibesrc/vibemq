@@ -43,8 +43,8 @@ impl WsStream {
         Self {
             sink,
             stream,
-            read_buffer: BytesMut::with_capacity(4096),
-            write_buffer: BytesMut::with_capacity(4096),
+            read_buffer: BytesMut::with_capacity(2048),
+            write_buffer: BytesMut::with_capacity(2048),
             pending_messages: VecDeque::new(),
             closed: false,
         }

@@ -5,6 +5,8 @@
 
 #![allow(clippy::field_reassign_with_default)]
 
+use std::sync::Arc;
+
 use bytes::{Bytes, BytesMut};
 use pretty_assertions::assert_eq;
 
@@ -335,7 +337,7 @@ fn test_publish_qos0() {
         dup: false,
         qos: QoS::AtMostOnce,
         retain: false,
-        topic: "test/topic".to_string(),
+        topic: Arc::from("test/topic"),
         packet_id: None,
         payload: Bytes::from("hello world"),
         properties: Properties::default(),
@@ -352,7 +354,7 @@ fn test_publish_qos1() {
         dup: false,
         qos: QoS::AtLeastOnce,
         retain: false,
-        topic: "test/topic".to_string(),
+        topic: Arc::from("test/topic"),
         packet_id: Some(1234),
         payload: Bytes::from("hello world"),
         properties: Properties::default(),
@@ -369,7 +371,7 @@ fn test_publish_qos2() {
         dup: true,
         qos: QoS::ExactlyOnce,
         retain: true,
-        topic: "sensors/temp".to_string(),
+        topic: Arc::from("sensors/temp"),
         packet_id: Some(65535),
         payload: Bytes::from(r#"{"temp": 25.5}"#),
         properties: Properties::default(),
@@ -394,7 +396,7 @@ fn test_publish_v5_with_properties() {
         dup: false,
         qos: QoS::AtLeastOnce,
         retain: false,
-        topic: "data/stream".to_string(),
+        topic: Arc::from("data/stream"),
         packet_id: Some(100),
         payload: Bytes::from(r#"{"value": 42}"#),
         properties: props,
@@ -411,7 +413,7 @@ fn test_publish_empty_payload() {
         dup: false,
         qos: QoS::AtMostOnce,
         retain: true,
-        topic: "clear/retained".to_string(),
+        topic: Arc::from("clear/retained"),
         packet_id: None,
         payload: Bytes::new(), // Empty payload clears retained message
         properties: Properties::default(),
@@ -1129,7 +1131,7 @@ fn test_roundtrip_all_packet_types_v311() {
             dup: false,
             qos: QoS::AtLeastOnce,
             retain: false,
-            topic: "test".to_string(),
+            topic: Arc::from("test"),
             packet_id: Some(1),
             payload: Bytes::from("data"),
             properties: Properties::default(),
@@ -1185,7 +1187,7 @@ fn test_roundtrip_all_packet_types_v5() {
             dup: false,
             qos: QoS::ExactlyOnce,
             retain: true,
-            topic: "test".to_string(),
+            topic: Arc::from("test"),
             packet_id: Some(1),
             payload: Bytes::from("data"),
             properties: Properties::default(),
@@ -1340,7 +1342,7 @@ mod proptest_tests {
                 dup: false,
                 qos: QoS::AtMostOnce,
                 retain,
-                topic,
+                topic: Arc::from(topic),
                 packet_id: None,
                 payload: Bytes::from(payload),
                 properties: Properties::default(),
@@ -1363,7 +1365,7 @@ mod proptest_tests {
                 dup,
                 qos: QoS::AtLeastOnce,
                 retain,
-                topic,
+                topic: Arc::from(topic),
                 packet_id: Some(packet_id),
                 payload: Bytes::from(payload),
                 properties: Properties::default(),

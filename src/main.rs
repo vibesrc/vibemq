@@ -420,7 +420,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Restore retained messages
         for (topic, stored) in loaded.retained {
             let msg = RetainedMessage {
-                topic: topic.clone(),
+                topic: Arc::from(topic.as_str()),
                 payload: bytes::Bytes::from(stored.payload),
                 qos: QoS::from_u8(stored.qos).unwrap_or_default(),
                 properties: Properties::from(stored.properties),

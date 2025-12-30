@@ -5,6 +5,7 @@
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
@@ -161,7 +162,7 @@ impl TestClient {
             dup: false,
             qos,
             retain,
-            topic: topic.to_string(),
+            topic: Arc::from(topic),
             packet_id,
             payload: Bytes::copy_from_slice(payload),
             properties: Properties::default(),
@@ -309,7 +310,7 @@ async fn test_publish_qos0_flow() {
     // Subscriber should receive the message
     tokio::time::sleep(Duration::from_millis(100)).await;
     if let Some(Packet::Publish(pub_msg)) = subscriber.recv().await {
-        assert_eq!(pub_msg.topic, "test/topic");
+        assert_eq!(&*pub_msg.topic, "test/topic");
         assert_eq!(&pub_msg.payload[..], b"hello");
     }
 
@@ -338,7 +339,7 @@ async fn test_publish_qos1_flow() {
         dup: false,
         qos: QoS::AtLeastOnce,
         retain: false,
-        topic: "qos1/test".to_string(),
+        topic: Arc::from("qos1/test"),
         packet_id: Some(100),
         payload: Bytes::from_static(b"qos1 message"),
         properties: Properties::default(),
@@ -377,7 +378,7 @@ async fn test_publish_qos2_flow() {
         dup: false,
         qos: QoS::ExactlyOnce,
         retain: false,
-        topic: "qos2/test".to_string(),
+        topic: Arc::from("qos2/test"),
         packet_id: Some(200),
         payload: Bytes::from_static(b"qos2 message"),
         properties: Properties::default(),
@@ -449,7 +450,7 @@ async fn test_wildcard_single_level() {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     if let Some(Packet::Publish(msg)) = subscriber.recv().await {
-        assert_eq!(msg.topic, "sensors/kitchen/temperature");
+        assert_eq!(&*msg.topic, "sensors/kitchen/temperature");
     }
 
     broker_handle.abort();
@@ -487,7 +488,7 @@ async fn test_wildcard_multi_level() {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     if let Some(Packet::Publish(msg)) = subscriber.recv().await {
-        assert_eq!(msg.topic, "home/floor1/room2/sensor/temp");
+        assert_eq!(&*msg.topic, "home/floor1/room2/sensor/temp");
     }
 
     broker_handle.abort();
@@ -528,7 +529,7 @@ async fn test_retained_message() {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     if let Some(Packet::Publish(msg)) = subscriber.recv().await {
-        assert_eq!(msg.topic, "status/device");
+        assert_eq!(&*msg.topic, "status/device");
         assert_eq!(&msg.payload[..], b"online");
         assert!(msg.retain);
     }
@@ -588,7 +589,7 @@ async fn test_will_message_on_disconnect() {
 
     // Subscriber should receive the will message
     if let Some(Packet::Publish(msg)) = subscriber.recv().await {
-        assert_eq!(msg.topic, "client/status");
+        assert_eq!(&*msg.topic, "client/status");
         assert_eq!(&msg.payload[..], b"offline");
     }
 
@@ -856,7 +857,7 @@ async fn test_max_awaiting_rel_limit() {
             dup: false,
             qos: QoS::ExactlyOnce,
             retain: false,
-            topic: "test/qos2".to_string(),
+            topic: Arc::from("test/qos2"),
             packet_id: Some(i),
             payload: Bytes::from(format!("msg{}", i)),
             properties: Properties::default(),
@@ -879,7 +880,7 @@ async fn test_max_awaiting_rel_limit() {
         dup: false,
         qos: QoS::ExactlyOnce,
         retain: false,
-        topic: "test/qos2".to_string(),
+        topic: Arc::from("test/qos2"),
         packet_id: Some(3),
         payload: Bytes::from("msg3"),
         properties: Properties::default(),
@@ -927,7 +928,7 @@ async fn test_max_inflight_limit() {
         dup: false,
         qos: QoS::AtLeastOnce,
         retain: false,
-        topic: "test/inflight".to_string(),
+        topic: Arc::from("test/inflight"),
         packet_id: Some(1),
         payload: Bytes::from("test message"),
         properties: Properties::default(),

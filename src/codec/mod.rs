@@ -3,12 +3,14 @@
 //! Provides encoding and decoding for MQTT v3.1.1 and v5.0 packets
 //! in a unified manner.
 
+mod cached;
 mod decode;
 mod encode;
 
 #[cfg(test)]
 mod tests;
 
+pub use cached::{CachedPublish, PublishCache, RawPublish};
 pub use decode::Decoder;
 pub use encode::Encoder;
 

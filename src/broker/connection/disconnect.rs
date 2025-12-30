@@ -8,13 +8,13 @@ use dashmap::DashMap;
 use parking_lot::RwLock;
 use smallvec::SmallVec;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tracing::debug;
 
 use super::{Connection, ConnectionError};
-use crate::broker::{BrokerEvent, RetainedMessage};
+use crate::broker::{BrokerEvent, RetainedMessage, SharedWriter};
 use crate::persistence::{PersistenceOp, StoredRetainedMessage, StoredSession};
-use crate::protocol::{Packet, Publish, QoS};
+use crate::protocol::{Publish, QoS};
 use crate::session::{QueueResult, Session, SessionStore};
 use crate::topic::SubscriptionStore;
 
@@ -104,11 +104,12 @@ where
                                     client_id, will.topic
                                 );
 
+                                let topic_arc: Arc<str> = Arc::from(will.topic.as_str());
                                 let publish = Publish {
                                     dup: false,
                                     qos: will.qos,
                                     retain: will.retain,
-                                    topic: will.topic.clone(),
+                                    topic: topic_arc.clone(),
                                     packet_id: None,
                                     payload: will.payload,
                                     properties: will.properties,
@@ -125,7 +126,7 @@ where
                                         }
                                     } else {
                                         let retained_msg = RetainedMessage {
-                                            topic: will.topic.clone(),
+                                            topic: topic_arc.clone(),
                                             payload: publish.payload.clone(),
                                             qos: publish.qos,
                                             properties: publish.properties.clone(),
@@ -161,11 +162,12 @@ where
                     });
                 } else {
                     // Publish immediately (no delay)
+                    let topic_arc: Arc<str> = Arc::from(will.topic.as_str());
                     let publish = Publish {
                         dup: false,
                         qos: will.qos,
                         retain: will.retain,
-                        topic: will.topic.clone(),
+                        topic: topic_arc.clone(),
                         packet_id: None,
                         payload: will.payload,
                         properties: will.properties,
@@ -182,7 +184,7 @@ where
                             }
                         } else {
                             let retained_msg = RetainedMessage {
-                                topic: will.topic.clone(),
+                                topic: topic_arc.clone(),
                                 payload: publish.payload.clone(),
                                 qos: publish.qos,
                                 properties: publish.properties.clone(),
@@ -199,8 +201,8 @@ where
                         }
                     }
 
-                    // Route will message
-                    let _ = self.route_message(client_id, &publish).await;
+                    // Route will message (no raw bytes - will message is constructed)
+                    let _ = self.route_message(client_id, &publish, None).await;
 
                     // Clear will from session (only when publishing immediately)
                     {
@@ -245,7 +247,7 @@ where
 /// Performance: Uses AHashMap for deduplication and SmallVec for subscription IDs
 pub(crate) async fn route_will_message(
     subscriptions: &SubscriptionStore,
-    connections: &DashMap<Arc<str>, mpsc::Sender<Packet>>,
+    connections: &DashMap<Arc<str>, Arc<SharedWriter>>,
     sessions: &SessionStore,
     events: &broadcast::Sender<BrokerEvent>,
     sender_id: &Arc<str>,
@@ -312,8 +314,13 @@ pub(crate) async fn route_will_message(
             outgoing.properties.subscription_identifiers.push(id);
         }
 
-        if let Some(sender) = connections.get(&client_id) {
-            let _ = sender.try_send(Packet::Publish(outgoing));
+        if let Some(writer) = connections.get(&client_id) {
+            let effective_retain = if sub_info.retain_as_published {
+                outgoing.retain
+            } else {
+                false
+            };
+            let _ = writer.send_publish(&mut outgoing, effective_qos, effective_retain);
         } else {
             // Client disconnected, queue message if persistent session
             if let Some(session) = sessions.get(client_id.as_ref()) {
@@ -327,7 +334,7 @@ pub(crate) async fn route_will_message(
 
     // Notify event subscribers (for bridge forwarding and monitoring)
     let _ = events.send(BrokerEvent::MessagePublished {
-        topic: publish.topic.clone(),
+        topic: publish.topic.to_string(),
         payload: publish.payload.clone(),
         qos: publish.qos,
         retain: publish.retain,
